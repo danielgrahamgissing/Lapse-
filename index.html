@@ -7,6 +7,16 @@
 <meta name="theme-color" content="#061A20">
 <meta name="color-scheme" content="dark">
 <meta name="supported-color-schemes" content="dark">
+
+<!-- Installable app (Add to Home Screen) -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lapse">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <style>
   /* Dark is the only theme. Declaring the scheme stops the browser's own
      dark/light feature from treating this as a light page and offering a
@@ -483,6 +493,33 @@
 <div class="phone" id="app"></div>
 
 <script>
+/* ---- Install-to-home-screen support ----
+   Android/Chrome fire 'beforeinstallprompt' which we stash and fire later
+   from our own button. iOS Safari has no such event, so we detect it and
+   show manual Share-sheet instructions instead. */
+var DEFERRED_INSTALL = null;
+var IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+var IS_STANDALONE = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+  || window.navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  DEFERRED_INSTALL = e;
+});
+window.addEventListener('appinstalled', function(){
+  DEFERRED_INSTALL = null;
+  if (typeof ping === 'function') ping('Lapse added to your home screen');
+});
+function canInstall(){ return !IS_STANDALONE && (DEFERRED_INSTALL !== null || IS_IOS); }
+function doInstall(){
+  if (DEFERRED_INSTALL){
+    DEFERRED_INSTALL.prompt();
+    DEFERRED_INSTALL.userChoice.then(function(){ DEFERRED_INSTALL = null; });
+    if (typeof S !== 'undefined'){ S.installPrompt = false; S.seenInstall = true; render(); }
+  } else if (IS_IOS){
+    if (typeof S !== 'undefined'){ S.iosInstall = true; render(); }
+  }
+}
+
 /* ============================================================
    LAPSE — standalone preview
    No frameworks, no CDN, no build step. Opens offline.
@@ -877,6 +914,7 @@ var S = {
   searchOpen:false,
   lang:"en",
   installPrompt:false,
+  iosInstall:false,
   seenInstall:false,
   membership:null,        // {plan, since, renews, cancelled, expires}
   contact:{subject:"",body:"",sent:false,err:""},
@@ -1119,6 +1157,14 @@ function viewNav(){
   });
 
   items.push(h("div",{class:"navsep"}));
+  if (canInstall()){
+    items.push(h("button",{class:"navitem",onclick:function(){
+      S.menu=false; doInstall();
+    }},[
+      icon("download",18),
+      h("span",{},["Add to home screen", h("span",{class:"sub"},["Use Lapse like an app"])])
+    ]));
+  }
   items.push(h("button",{class:"navitem",style:"color:#F0906A",onclick:signOut},[
     icon("logout",18),
     h("span",{},[T("logOut"), h("span",{class:"sub"},[T("signBackIn")])])
@@ -1432,13 +1478,11 @@ function monthsUntil(item){
    from which the user can Save as PDF. No libraries, no network. */
 function downloadPdf(){
   var items = sortedItems();
-  var totalMonthly = 0, totalToEnd = 0;
+  var totalMonthly = 0;
 
   var rows = items.map(function(it){
     var mc = monthlyCost(it);
     totalMonthly += mc;
-    var toEnd = mc * monthsUntil(it);
-    totalToEnd += toEnd;
     var occ = it.occurrence==="monthly" ? "Monthly" : it.occurrence==="yearly" ? "Yearly" : "One-off";
     var pay = it.occurrence==="monthly" && it.payDay ? ordinal(it.payDay) : "—";
     return "<tr>"
@@ -1479,9 +1523,7 @@ function downloadPdf(){
     + "<div class='hd'>"+markSvg(34)+"<div><p class='ttl'>LAPSE</p><p class='sub'>Contract summary · "+today+"</p></div></div>"
     + "<div class='cards'>"
     + "<div class='card'><p class='k'>Total monthly cost</p><p class='v'>£"+(totalMonthly/100).toFixed(2)+"</p>"
-    + "<p class='n'>Recurring outgoings per month (yearly costs spread over 12).</p></div>"
-    + "<div class='card'><p class='k'>Monthly cost up to end dates</p><p class='v'>£"+(totalToEnd/100).toFixed(2)+"</p>"
-    + "<p class='n'>Total you'll pay from today until each contract's end date.</p></div>"
+    + "<p class='n'>Your recurring outgoings per month across all contracts (yearly costs spread over 12, one-offs excluded).</p></div>"
     + "</div>"
     + "<table><thead><tr>"
     + "<th>Contract</th><th>Occurrence</th><th>Pay day</th><th>End date</th><th class='num'>Cost</th><th class='num'>Per month</th>"
@@ -1937,10 +1979,7 @@ function viewProfile(){
            h("span",{style:"flex:1"},[
              h("span",{class:"t"},[T("logOut")]),
              h("span",{class:"s"},[T("signBackIn")])
-           ])]),
-        h("button",{class:"prow",style:"color:#B44F2C;font-size:14px",
-          onclick:function(){ ping("Prototype — account deletion not wired up"); }},
-          [icon("trash",15),T("deleteAccount")])
+           ])])
       ]),
       h("p",{style:"font-size:12px;color:rgba(207,243,239,.7);margin:12px 6px 0;line-height:1.55"},
         ["Cancelling stops future payments. You keep access until the end of the period you've paid for, and your items are never deleted."])
@@ -2071,16 +2110,42 @@ function viewInstallPrompt(){
         [T("addHome")]),
       h("p",{style:"margin:9px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55;text-align:center"},
         [T("addHomeBody")]),
-      h("div",{style:"margin-top:16px;border-radius:12px;background:rgba(45,191,196,.08);border:1px solid rgba(45,191,196,.22);padding:12px 14px"},[
-        h("p",{style:"margin:0;font-size:12.5px;color:var(--muted);line-height:1.55"},
-          [T("addHomeHow")])
-      ]),
+      IS_IOS ? h("div",{style:"margin-top:16px;border-radius:12px;background:rgba(45,191,196,.08);border:1px solid rgba(45,191,196,.22);padding:12px 14px"},[
+        h("p",{style:"margin:0;font-size:12.5px;color:var(--muted);line-height:1.6"},
+          ["On iPhone: tap the ", h("b",{style:"color:var(--ink)"},["Share"]),
+           " button below, then ", h("b",{style:"color:var(--ink)"},["Add to Home Screen"]), "."])
+      ]) : null,
       h("button",{class:"btn btn-aqua",style:"margin-top:16px;padding:13px",
-        onclick:function(){ S.installPrompt=false; S.seenInstall=true; render(); }},
-        [T("gotIt")]),
+        onclick:function(){
+          S.installPrompt=false; S.seenInstall=true;
+          if (DEFERRED_INSTALL || IS_IOS) doInstall(); else render();
+        }},
+        [icon("download",16), IS_IOS ? "Show me how" : T("addHome")]),
       h("button",{style:"width:100%;margin-top:9px;padding:9px;font-size:13.5px;font-weight:600;color:var(--muted)",
         onclick:function(){ S.installPrompt=false; S.seenInstall=true; render(); }},
         [T("later")]),
+    ])
+  ]);
+}
+
+/* iOS manual instructions sheet */
+function viewIosInstall(){
+  return h("div",{class:"modalscrim",onclick:function(e){
+    if (e.target && e.target.className==="modalscrim"){ S.iosInstall=false; render(); }
+  }},[
+    h("div",{class:"modal"},[
+      h("div",{style:"display:flex;justify-content:center"},[
+        h("div",{class:"installicon"},[mark(42)])
+      ]),
+      h("h2",{class:"serif",style:"margin:16px 0 0;font-size:20px;color:var(--ink);text-align:center"},
+        ["Add Lapse to your iPhone"]),
+      h("ol",{style:"margin:16px 0 0;padding-left:20px;font-size:14px;color:var(--ink);line-height:1.7"},[
+        h("li",{},["Tap the ", h("b",{},["Share"]), " icon at the bottom of Safari (a square with an arrow)."]),
+        h("li",{},["Scroll down and tap ", h("b",{},["Add to Home Screen"]), "."]),
+        h("li",{},["Tap ", h("b",{},["Add"]), " in the top corner. Lapse will appear on your home screen."])
+      ]),
+      h("button",{class:"btn btn-aqua",style:"margin-top:18px;padding:13px",
+        onclick:function(){ S.iosInstall=false; render(); }},["Got it"])
     ])
   ]);
 }
@@ -2114,12 +2179,20 @@ function render(){
   if (S.sortPicker && S.user) app.appendChild(viewSortPicker());
   if (S.paywall && S.user) app.appendChild(viewPaywall());
   if (S.installPrompt && S.user && S.stage === "app") app.appendChild(viewInstallPrompt());
+  if (S.iosInstall) app.appendChild(viewIosInstall());
 
   if (S.toast){
     app.appendChild(h("div",{class:"toast fade"},[icon("check",15,"#5EE7D0"), S.toast]));
   }
 }
 
+/* On load, go straight to the contracts home screen rather than the
+   welcome/sign-up flow. Until the real backend and login are wired in,
+   the app opens signed-in with the demo contracts so a refresh always
+   lands on the home screen. */
+S.seenInstall = true;          // don't auto-pop the install sheet on every load
+startApp(false);
+S.installPrompt = false;
 render();
 </script>
 </body>
