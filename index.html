@@ -488,11 +488,114 @@
   .step .k{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:700;color:#1B7F87}
   .step .v{margin:6px 0 0;font-size:14px;color:var(--muted);line-height:1.6}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <div class="phone" id="app"></div>
 
 <script>
+/* ============================================================
+   Supabase backend — real login and saved contracts.
+   The URL and publishable key are safe to expose in the browser;
+   Row Level Security on the database is what actually protects data.
+   ============================================================ */
+var SUPABASE_URL = "https://batjgkwcxdvwkgofdcgr.supabase.co";
+var SUPABASE_KEY = "sb_publishable__F6Dmu5BukoSW-THfEWaag_wtL_36NA";
+var sb = null;
+try {
+  if (window.supabase && window.supabase.createClient){
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  }
+} catch(e){ /* library blocked or offline; app will show a notice */ }
+
+/* Map a database row -> the shape the UI uses */
+function rowToItem(r){
+  return {
+    id: r.id,
+    name: r.name,
+    category: r.category || "personal",
+    cost: (r.cost === null || r.cost === undefined) ? null : r.cost,
+    provider: r.provider || "",
+    ref: r.reference || "",
+    notes: r.notes || "",
+    occurrence: r.occurrence || "yearly",
+    payDay: (r.pay_day === null || r.pay_day === undefined) ? null : r.pay_day,
+    endDate: r.end_date || "",
+    remind: r.remind || [30,7,1],
+    files: []
+  };
+}
+/* Map a UI item -> database columns */
+function itemToRow(it, userId){
+  return {
+    user_id: userId,
+    name: it.name,
+    category: it.category || "personal",
+    cost: (it.cost === null || it.cost === undefined || isNaN(it.cost)) ? null : it.cost,
+    provider: it.provider || "",
+    reference: it.ref || "",
+    notes: it.notes || "",
+    occurrence: it.occurrence || "yearly",
+    pay_day: (it.payDay === null || it.payDay === undefined) ? null : it.payDay,
+    end_date: it.endDate || null,
+    remind: it.remind || [30,7,1]
+  };
+}
+
+/* Send a magic link to the given email */
+function sendMagicLink(email, cb){
+  if (!sb){ cb("offline"); return; }
+  sb.auth.signInWithOtp({
+    email: email,
+    options: { emailRedirectTo: window.location.origin }
+  }).then(function(res){
+    cb(res.error ? (res.error.message || "error") : null);
+  }).catch(function(){ cb("error"); });
+}
+
+/* Load the signed-in user's contracts from the database */
+function loadContracts(cb){
+  if (!sb || !S.user){ cb([]); return; }
+  sb.from("contracts").select("*").order("end_date",{ascending:true})
+    .then(function(res){
+      if (res.error){ cb([]); return; }
+      cb((res.data||[]).map(rowToItem));
+    }).catch(function(){ cb([]); });
+}
+
+/* Insert a new contract; calls back with the saved item (incl. real id) */
+function insertContract(item, cb){
+  if (!sb || !S.user){ cb(null); return; }
+  sb.from("contracts").insert(itemToRow(item, S.user.id)).select().single()
+    .then(function(res){ cb(res.error ? null : rowToItem(res.data)); })
+    .catch(function(){ cb(null); });
+}
+
+/* Update an existing contract by id */
+function updateContract(id, item, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("contracts").update(itemToRow(item, S.user.id)).eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+
+/* Delete a contract by id */
+function deleteContract(id, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("contracts").delete().eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+
+/* Load the user's profile (subscription status) */
+function loadProfile(cb){
+  if (!sb || !S.user){ cb(null); return; }
+  sb.from("profiles").select("*").eq("id", S.user.id).single()
+    .then(function(res){ cb(res.error ? null : res.data); })
+    .catch(function(){ cb(null); });
+}
+
+
 /* ---- Install-to-home-screen support ----
    Android/Chrome fire 'beforeinstallprompt' which we stash and fire later
    from our own button. iOS Safari has no such event, so we detect it and
@@ -902,6 +1005,7 @@ function addDays(n){
 var S = {
   user:null, screen:"listing", plan:"free", active:null,
   paywall:false, toast:null, authMode:"signup", authEmail:"", authSent:false, authErr:"",
+  sending:false, magicSent:false,
   pick:"monthly", notifyEmail:true, notifyPush:false,
   stage:"welcome",        // welcome -> pricing -> app
   trial:false,
@@ -971,20 +1075,18 @@ function hasActiveMembership(){
    redirects to Stripe and returns via webhook; here it completes straight
    away so the flow can be walked through. */
 function goCheckout(plan){
+  /* Placeholder until Stripe is wired in the next stage. For now this
+     just unlocks adding locally so the logged-in user can keep testing.
+     It does NOT touch the real signed-in user or inject demo data. */
   S.pick = plan || S.pick;
   S.paywall = false;
   var today = TODAY.toISOString().slice(0,10);
   S.membership = {plan:S.pick, since:today,
     renews: addMonths(today, S.pick==="annual"?12:1), cancelled:false, expires:null};
   S.plan="pro"; S.trial=false;
-  if (!S.user) S.user = {email:S.authEmail||"you@example.com"};
-  if (!S.items.length && !S.everHadItems){
-    S.items = S.demoItems.map(function(i){ return Object.assign({},i); });
-  }
   S.stage="app"; S.screen="listing";
-  if (!S.seenInstall) S.installPrompt = true;
   render();
-  ping(S.pick==="annual" ? "Subscribed — £9.99 a year" : "Subscribed — £1 a month");
+  ping("Test mode — Stripe not connected yet");
 }
 
 function trialFull(){ return S.trial && S.items.length >= FREE_LIMIT; }
@@ -1185,14 +1287,29 @@ function viewNav(){
 }
 
 function signOut(){
+  if (sb){ try { sb.auth.signOut(); } catch(e){} }
   S.user=null; S.stage="welcome"; S.screen="listing"; S.menu=false;
   S.active=null; S.paywall=false; S.trial=false; S.plan="free";
   S.items=[]; S.membership=null; S.authEmail=""; S.authErr="";
+  S.magicSent=false; S.sending=false;
   S.contact={subject:"",body:"",sent:false,err:""};
   render(); ping("Logged out");
 }
 
 
+
+/* Brief loading screen while we check for an existing session */
+function viewLoading(){
+  return [
+    h("div",{class:"wel"},[
+      h("div",{class:"wel-glow"}),
+      h("div",{style:"flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px"},[
+        mark(64),
+        h("p",{style:"font-size:13px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;font-weight:600"},["Loading…"])
+      ])
+    ])
+  ];
+}
 
 /* Stage 1 — welcome: logo, what it does, email capture */
 function viewWelcome(){
@@ -1208,7 +1325,16 @@ function viewWelcome(){
 
   function go(){
     if (!isEmail(S.authEmail)){ S.authErr = T("badEmail"); render(); return; }
-    S.authErr = ""; S.stage = "pricing"; render();
+    S.authErr = ""; S.sending = true; render();
+    sendMagicLink(S.authEmail, function(err){
+      S.sending = false;
+      if (err === "offline"){
+        S.authErr = "Can't reach the server. Check your connection and try again.";
+        render(); return;
+      }
+      if (err){ S.authErr = "Couldn't send the link. Please try again."; render(); return; }
+      S.magicSent = true; render();
+    });
   }
 
   function wcard(ic,title,body){
@@ -1247,23 +1373,25 @@ function viewWelcome(){
           wcard("camera",T("c4t"), T("c4b"))
         ]),
 
-        h("div",{class:"wform"},[
+        S.magicSent ? h("div",{class:"wform"},[
+          h("div",{style:"text-align:center;padding:6px 4px"},[
+            h("span",{style:"display:inline-flex;padding:13px;border-radius:14px;background:rgba(45,191,196,.16);color:var(--aqua);box-shadow:inset 0 0 0 1px rgba(143,240,182,.25)"},[icon("bell",22)]),
+            h("h3",{class:"serif",style:"margin:14px 0 0;font-size:19px;color:var(--ink)"},["Check your email"]),
+            h("p",{style:"margin:8px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55"},
+              ["We've sent a sign-in link to ", h("b",{style:"color:var(--ink)"},[S.authEmail]),
+               ". Tap it on this device to sign in. It can take a minute to arrive — check spam too."]),
+            h("button",{style:"margin-top:16px;font-size:13.5px;font-weight:600;color:var(--aqua)",
+              onclick:function(){ S.magicSent=false; render(); }},["Use a different email"])
+          ])
+        ]) : h("div",{class:"wform"},[
           h("label",{class:"wlabel"},[T("emailLabel")]),
           input,
-          S.authErr ? h("p",{style:"font-size:12.5px;color:#B44F2C;margin:7px 0 0"},[S.authErr]) : null,
-          h("p",{style:"font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.45"},[T("emailHint")]),
-          h("button",{class:"btn btn-aqua",style:"margin-top:13px;padding:14px",onclick:go},[T("cont")]),
-
-          h("div",{style:"display:flex;align-items:center;gap:10px;margin:14px 0 12px"},[
-            h("span",{style:"flex:1;height:1px;background:var(--line)"}),
-            h("span",{style:"font-size:11px;color:var(--faint);font-weight:600"},[T("haveAccount")]),
-            h("span",{style:"flex:1;height:1px;background:var(--line)"})
-          ]),
-          h("button",{class:"btn",style:"padding:13px;background:transparent;border:1px solid var(--aqua);color:#1B7F87;font-weight:700",
-            onclick:function(){
-              if (!isEmail(S.authEmail)){ S.authErr = T("badEmail"); render(); return; }
-              S.authErr=""; signInExisting();
-            }},[T("signIn")])
+          S.authErr ? h("p",{style:"font-size:12.5px;color:#F0906A;margin:7px 0 0"},[S.authErr]) : null,
+          h("p",{style:"font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.45"},
+            ["Enter your email and we'll send a secure sign-in link. No password needed."]),
+          h("button",{class:"btn btn-aqua",style:"margin-top:13px;padding:14px",
+            disabled: S.sending, onclick:go},
+            [ S.sending ? "Sending…" : "Send me a sign-in link" ])
         ]),
 
         h("p",{class:"wnote"},[T("privacy")]),
@@ -1725,13 +1853,29 @@ function viewEdit(){
   saveBtn.addEventListener("click",function(){
     if (!(f.name||"").trim()) return;
     if (isEdit){
-      S.items = S.items.map(function(i){ return i.id===S.active.id ? Object.assign({},f,{id:S.active.id}) : i; });
+      var id = S.active.id;
+      S.items = S.items.map(function(i){ return i.id===id ? Object.assign({},f,{id:id}) : i; });
       S.active=null; S.screen="listing"; render(); ping("Changes saved");
+      updateContract(id, f, function(ok){
+        if (!ok) ping("Couldn't save changes — check connection");
+      });
     } else {
       if (!canAdd()){ S.paywall=true; render(); return; }
-      S.items = S.items.concat([Object.assign({},f,{id:Date.now()})]);
+      var temp = Object.assign({},f,{id:"tmp-"+Date.now()});
+      S.items = S.items.concat([temp]);
       S.everHadItems = true;
       S.active=null; S.screen="listing"; render(); ping("Added to your list");
+      insertContract(f, function(saved){
+        if (saved){
+          /* swap the temporary row for the saved one (with real id) */
+          S.items = S.items.map(function(i){ return i.id===temp.id ? saved : i; });
+          render();
+        } else {
+          /* failed — remove the optimistic row and warn */
+          S.items = S.items.filter(function(i){ return i.id!==temp.id; });
+          render(); ping("Couldn't save — check connection and try again");
+        }
+      });
     }
   });
 
@@ -1883,8 +2027,12 @@ function viewDetail(){
             ["Nothing attached yet. Tap Edit to add a photo or upload a document."]),
 
       h("button",{class:"danger",style:"margin-top:22px",onclick:function(){
-        S.items = S.items.filter(function(i){ return i.id !== item.id; });
+        var id = item.id;
+        S.items = S.items.filter(function(i){ return i.id !== id; });
         S.active=null; S.screen="listing"; render(); ping("Deleted");
+        deleteContract(id, function(ok){
+          if (!ok) ping("Couldn't delete on the server — check connection");
+        });
       }},[icon("trash",15),T("deleteItem")])
     ])
   ];
@@ -2156,7 +2304,9 @@ function render(){
   app.innerHTML = "";
   var kids;
 
-  if (S.stage === "pricing"){
+  if (S.stage === "loading"){
+    kids = viewLoading();
+  } else if (S.stage === "pricing"){
     kids = viewPricing();
   } else if (!S.user){
     kids = viewWelcome();
@@ -2186,14 +2336,60 @@ function render(){
   }
 }
 
-/* On load, go straight to the contracts home screen rather than the
-   welcome/sign-up flow. Until the real backend and login are wired in,
-   the app opens signed-in with the demo contracts so a refresh always
-   lands on the home screen. */
-S.seenInstall = true;          // don't auto-pop the install sheet on every load
-startApp(false);
-S.installPrompt = false;
+/* ---- Boot: check for a logged-in session, then show the right screen ----
+   If Supabase has a session (either already stored, or just created by a
+   magic-link click), we load the user's contracts and go to the app.
+   Otherwise we show the welcome/login screen. */
+S.seenInstall = true;
+S.stage = "loading";
 render();
+
+function enterApp(user){
+  S.user = { id: user.id, email: user.email };
+  S.authEmail = user.email;
+  loadProfile(function(profile){
+    S.membership = (profile && profile.subscribed)
+      ? { plan: profile.plan || "monthly", since:null, renews: profile.current_period_end, cancelled:false, expires:null }
+      : null;
+    loadContracts(function(items){
+      S.items = items;
+      S.everHadItems = items.length > 0;
+      S.plan = (profile && profile.subscribed) ? "pro" : "free";
+      S.trial = !(profile && profile.subscribed);
+      S.stage = "app";
+      S.screen = "listing";
+      S.installPrompt = false;
+      render();
+    });
+  });
+}
+
+function showWelcome(){
+  S.user = null;
+  S.stage = "welcome";
+  S.screen = "listing";
+  render();
+}
+
+if (sb){
+  sb.auth.getSession().then(function(res){
+    var session = res && res.data && res.data.session;
+    if (session && session.user){ enterApp(session.user); }
+    else { showWelcome(); }
+  }).catch(showWelcome);
+
+  /* When a magic link is clicked, Supabase fires SIGNED_IN */
+  sb.auth.onAuthStateChange(function(event, session){
+    if (event === "SIGNED_IN" && session && session.user){
+      if (S.stage !== "app") enterApp(session.user);
+    }
+    if (event === "SIGNED_OUT"){ showWelcome(); }
+  });
+} else {
+  /* Library failed to load (offline / blocked) — show welcome with a notice */
+  S.stage = "welcome";
+  render();
+}
 </script>
 </body>
 </html>
