@@ -1,0 +1,6 @@
+# Ensure the manifest is served with the correct content type so Chrome
+# treats the site as an installable app.
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Content-Type = "application/manifest+json"
