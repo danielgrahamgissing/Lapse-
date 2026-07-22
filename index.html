@@ -1005,7 +1005,7 @@ function addDays(n){
 var S = {
   user:null, screen:"listing", plan:"free", active:null,
   paywall:false, toast:null, authMode:"signup", authEmail:"", authSent:false, authErr:"",
-  sending:false, magicSent:false,
+  sending:false, magicSent:false, checkoutBusy:false,
   pick:"monthly", notifyEmail:true, notifyPush:false,
   stage:"welcome",        // welcome -> pricing -> app
   trial:false,
@@ -1075,18 +1075,40 @@ function hasActiveMembership(){
    redirects to Stripe and returns via webhook; here it completes straight
    away so the flow can be walked through. */
 function goCheckout(plan){
-  /* Placeholder until Stripe is wired in the next stage. For now this
-     just unlocks adding locally so the logged-in user can keep testing.
-     It does NOT touch the real signed-in user or inject demo data. */
+  /* Real Stripe checkout. Calls our Netlify function, which creates a
+     Stripe Checkout session and returns its URL; we then send the user
+     to Stripe to pay. After payment Stripe returns them to /?paid=1 and
+     the webhook flips their profile to subscribed. */
   S.pick = plan || S.pick;
-  S.paywall = false;
-  var today = TODAY.toISOString().slice(0,10);
-  S.membership = {plan:S.pick, since:today,
-    renews: addMonths(today, S.pick==="annual"?12:1), cancelled:false, expires:null};
-  S.plan="pro"; S.trial=false;
-  S.stage="app"; S.screen="listing";
+  if (S.checkoutBusy) return;
+  S.checkoutBusy = true;
   render();
-  ping("Test mode — Stripe not connected yet");
+
+  fetch("/.netlify/functions/create-checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      plan: S.pick,
+      email: S.user ? S.user.email : S.authEmail,
+      userId: S.user ? S.user.id : "",
+      origin: window.location.origin
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(res){
+    if (res && res.url){
+      window.location.href = res.url;   // off to Stripe
+    } else {
+      S.checkoutBusy = false;
+      render();
+      ping((res && res.error) ? res.error : "Couldn't start checkout — try again");
+    }
+  })
+  .catch(function(){
+    S.checkoutBusy = false;
+    render();
+    ping("Couldn't reach the payment server — check connection");
+  });
 }
 
 function trialFull(){ return S.trial && S.items.length >= FREE_LIMIT; }
@@ -1475,11 +1497,12 @@ function viewPricing(){
       ])
     ]),
     h("div",{class:"foot"},[
-      h("button",{class:"btn btn-aqua",onclick:function(){
+      h("button",{class:"btn btn-aqua",disabled:S.checkoutBusy,onclick:function(){
         goCheckout(S.pick);
-      }},[ S.pick==="annual" ? T("annual")+" — £9.99" : T("monthly")+" — £1" ]),
+      }},[ S.checkoutBusy ? "Redirecting to secure checkout…"
+           : (S.pick==="annual" ? T("annual")+" — £9.99" : T("monthly")+" — £1") ]),
       h("p",{style:"text-align:center;font-size:12px;color:rgba(207,243,239,.72);margin:12px 6px 0;line-height:1.6"},
-        ["Cancel anytime from your profile. Next: payment details."])
+        ["Secure payment by Stripe. Cancel anytime from your profile."])
     ])
   ];
 }
@@ -2360,7 +2383,39 @@ function enterApp(user){
       S.screen = "listing";
       S.installPrompt = false;
       render();
+
+      /* Just returned from a successful Stripe checkout? The webhook may
+         take a second or two to flip the profile, so poll a few times. */
+      if (/[?&]paid=1/.test(window.location.search) && !(profile && profile.subscribed)){
+        confirmPayment(0);
+      }
+      /* Clean the ?paid / ?canceled off the URL so refreshes are tidy */
+      if (window.history && window.history.replaceState && /[?]/.test(window.location.search)){
+        try { window.history.replaceState({}, "", window.location.pathname); } catch(e){}
+      }
+      if (/[?&]canceled=1/.test(window.location.search)){
+        ping("Checkout canceled — no charge made");
+      }
     });
+  });
+}
+
+/* Poll the profile a few times after returning from Stripe, until the
+   webhook has marked the account subscribed. */
+function confirmPayment(attempt){
+  if (attempt === 0) ping("Confirming your payment…");
+  loadProfile(function(profile){
+    if (profile && profile.subscribed){
+      S.membership = { plan: profile.plan || "monthly", since:null,
+        renews: profile.current_period_end, cancelled:false, expires:null };
+      S.plan = "pro"; S.trial = false;
+      render();
+      ping("You're subscribed — thank you!");
+    } else if (attempt < 6){
+      setTimeout(function(){ confirmPayment(attempt+1); }, 2000);
+    } else {
+      ping("Payment received — it may take a moment to update.");
+    }
   });
 }
 

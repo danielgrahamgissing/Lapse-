@@ -1,5 +1,12 @@
-# Ensure the manifest is served with the correct content type so Chrome
-# treats the site as an installable app.
+# Netlify configuration for Lapse
+
+# Serverless functions live here
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Serve the manifest with the correct content type so Chrome treats
+# the site as an installable app.
 [[headers]]
   for = "/manifest.json"
   [headers.values]
