@@ -21,7 +21,7 @@ exports.handler = async function (event) {
     return { statusCode: 500, body: JSON.stringify({ error: "Server not configured" }) };
   }
 
-  const stripe = Stripe(key);
+  const stripe = Stripe(key, { apiVersion: "2025-03-31.basil" });
 
   let data = {};
   try { data = JSON.parse(event.body || "{}"); } catch (e) {}
