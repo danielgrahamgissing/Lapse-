@@ -14,7 +14,7 @@ const { createClient } = require("@supabase/supabase-js");
 exports.handler = async function (event) {
   const key = process.env.STRIPE_SECRET_KEY;
   const whSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  const stripe = Stripe(key);
+  const stripe = Stripe(key, { apiVersion: "2025-03-31.basil" });
 
   let stripeEvent;
   try {
