@@ -47,8 +47,19 @@ exports.handler = async function (event) {
       let periodEnd = null;
       if (session.subscription) {
         const sub = await stripe.subscriptions.retrieve(session.subscription);
-        if (sub && sub.current_period_end) {
-          periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+        // In API 2025-03-31.basil the period moved onto the subscription
+        // items, so check there first and fall back to the old location.
+        let endUnix = null;
+        if (sub) {
+          if (sub.items && sub.items.data && sub.items.data[0] &&
+              sub.items.data[0].current_period_end) {
+            endUnix = sub.items.data[0].current_period_end;
+          } else if (sub.current_period_end) {
+            endUnix = sub.current_period_end;
+          }
+        }
+        if (endUnix) {
+          periodEnd = new Date(endUnix * 1000).toISOString();
         }
         // Save the Stripe customer id for later management
         if (userId && sub.customer) {
