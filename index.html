@@ -1123,6 +1123,9 @@ function daysUntil(iso){
   return Math.round((t - new Date(TODAY.toDateString()))/86400000);
 }
 function fmtDate(iso){
+  /* Guard against null/empty: new Date(null) is 1 Jan 1970, which would
+     display as a real (and very wrong) date. */
+  if (iso === null || iso === undefined || iso === "") return "—";
   var d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
@@ -2372,7 +2375,7 @@ function enterApp(user){
   S.authEmail = user.email;
   loadProfile(function(profile){
     S.membership = (profile && profile.subscribed)
-      ? { plan: profile.plan || "monthly", since:null, renews: profile.current_period_end, cancelled:false, expires:null }
+      ? { plan: profile.plan || "monthly", since: profile.created_at || null, renews: profile.current_period_end || null, cancelled:false, expires:null }
       : null;
     loadContracts(function(items){
       S.items = items;
@@ -2406,8 +2409,8 @@ function confirmPayment(attempt){
   if (attempt === 0) ping("Confirming your payment…");
   loadProfile(function(profile){
     if (profile && profile.subscribed){
-      S.membership = { plan: profile.plan || "monthly", since:null,
-        renews: profile.current_period_end, cancelled:false, expires:null };
+      S.membership = { plan: profile.plan || "monthly", since: profile.created_at || null,
+        renews: profile.current_period_end || null, cancelled:false, expires:null };
       S.plan = "pro"; S.trial = false;
       render();
       ping("You're subscribed — thank you!");
