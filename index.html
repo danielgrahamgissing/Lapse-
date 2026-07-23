@@ -1021,7 +1021,7 @@ var S = {
   iosInstall:false,
   seenInstall:false,
   membership:null,        // {plan, since, renews, cancelled, expires}
-  contact:{subject:"",body:"",sent:false,err:""},
+  contact:{subject:"",body:"",sent:false,err:"",sending:false},
   everHadItems:false,
   demoItems:[
     {id:1,name:"MOT",category:"personal",cost:5500,provider:"Kwik Fit",ref:"",notes:"Garage on Mill Lane. Book a week ahead.",files:[],occurrence:"yearly",payDay:null,endDate:addDays(-3),remind:[30,7,1]},
@@ -1317,7 +1317,7 @@ function signOut(){
   S.active=null; S.paywall=false; S.trial=false; S.plan="free";
   S.items=[]; S.membership=null; S.authEmail=""; S.authErr="";
   S.magicSent=false; S.sending=false;
-  S.contact={subject:"",body:"",sent:false,err:""};
+  S.contact={subject:"",body:"",sent:false,err:"",sending:false};
   render(); ping("Logged out");
 }
 
@@ -2174,8 +2174,34 @@ function viewMission(){
   function send(){
     if (!S.contact.subject.trim()){ S.contact.err="Add a subject"; return render(); }
     if (S.contact.body.trim().length < 10){ S.contact.err="Tell us a little more"; return render(); }
-    S.contact.err=""; S.contact.sent=true; render();
-    ping("Message sent — we'll reply by email");
+    if (S.contact.sending) return;
+    S.contact.err=""; S.contact.sending=true; render();
+
+    fetch("/.netlify/functions/send-contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: S.user ? S.user.email : S.authEmail,
+        subject: S.contact.subject,
+        message: S.contact.body
+      })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      S.contact.sending = false;
+      if (res && res.ok){
+        S.contact.sent = true; render();
+        ping("Message sent — we'll reply by email");
+      } else {
+        S.contact.err = (res && res.error) ? res.error : "Couldn't send — please try again";
+        render();
+      }
+    })
+    .catch(function(){
+      S.contact.sending = false;
+      S.contact.err = "Couldn't reach the server — check your connection";
+      render();
+    });
   }
 
   var contactBlock = S.contact.sent
@@ -2185,7 +2211,7 @@ function viewMission(){
         h("p",{style:"margin:6px 0 0;font-size:13px;color:var(--muted);line-height:1.55"},
           ["We'll reply to "+(S.user?S.user.email:"your email")+" within two working days."]),
         h("button",{style:"margin-top:13px;font-size:13.5px;font-weight:600;color:#1B7F87",
-          onclick:function(){ S.contact={subject:"",body:"",sent:false,err:""}; render(); }},
+          onclick:function(){ S.contact={subject:"",body:"",sent:false,err:"",sending:false}; render(); }},
           [T("sendAnother")]),
       ])
     : h("div",{class:"paycard"},[
@@ -2195,8 +2221,9 @@ function viewMission(){
         h("label",{class:"wlabel"},[T("message")]),
         bodyInp,
         S.contact.err ? h("p",{style:"font-size:12.5px;color:#B44F2C;margin:9px 0 0"},[S.contact.err]) : null,
-        h("button",{class:"btn btn-deep",style:"margin-top:13px;padding:13px;font-size:14.5px",onclick:send},
-          [icon("send",16),T("sendMsg")]),
+        h("button",{class:"btn btn-deep",style:"margin-top:13px;padding:13px;font-size:14.5px",
+          disabled:S.contact.sending,onclick:send},
+          [icon("send",16), S.contact.sending ? "Sending…" : T("sendMsg")]),
         h("p",{style:"font-size:11.5px;color:var(--muted);margin:10px 0 0;text-align:center;line-height:1.5"},
           ["We'll reply to "+(S.user?S.user.email:"your registered email")+"."])
       ]);
