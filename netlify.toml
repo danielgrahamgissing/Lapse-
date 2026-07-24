@@ -5,6 +5,12 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Daily reminder sweep at 08:00 UK time.
+# Cron is UTC: 8am GMT in winter, 9am BST in summer. Close enough for a
+# morning reminder, and avoids the complexity of shifting with the clocks.
+[functions."send-reminders"]
+  schedule = "0 8 * * *"
+
 # Serve the manifest with the correct content type so Chrome treats
 # the site as an installable app.
 [[headers]]
