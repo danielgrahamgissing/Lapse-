@@ -143,8 +143,8 @@
        padding:12px 14px;font-size:15px;color:var(--ink)}
   .inp:focus{outline:none;border-color:var(--aqua);box-shadow:0 0 0 2px rgba(45,191,196,.35)}
   .inp.bad{border-color:var(--ember);box-shadow:0 0 0 2px rgba(217,102,61,.3)}
-  .codeinp{text-align:center;font-size:26px;font-weight:700;letter-spacing:.34em;
-           font-family:Georgia,"Times New Roman",serif;padding:15px 10px;text-indent:.34em}
+  .codeinp{text-align:center;font-size:24px;font-weight:700;letter-spacing:.2em;
+           font-family:Georgia,"Times New Roman",serif;padding:15px 8px;text-indent:.2em}
   .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .cat3{display:flex;gap:10px;justify-content:center}
   .cat3 .catbtn{flex:1;max-width:120px}
@@ -544,7 +544,7 @@ function itemToRow(it, userId){
   };
 }
 
-/* Send a 6-digit sign-in code to the given email.
+/* Send a sign-in code to the given email.
    Omitting emailRedirectTo makes Supabase send a code rather than a link,
    which matters for the installed app: a link opens the browser (a
    separate session) and leaves the app still logged out. A code is typed
@@ -1367,19 +1367,21 @@ function viewWelcome(){
   });
   input.addEventListener("keydown",function(e){ if(e.key==="Enter") go(); });
 
-  /* 6-digit code entry, shown after the email has been sent */
+  /* Sign-in code entry. Supabase's OTP length is configurable (commonly
+     6, but can be 8), so accept a range rather than assuming 6 —
+     silently truncating a longer code breaks sign-in. */
   var codeInp = h("input",{
     class:"inp codeinp"+(S.authErr?" bad":""), type:"text", inputmode:"numeric",
-    autocomplete:"one-time-code", maxlength:"6", placeholder:"123456", value:S.authCode
+    autocomplete:"one-time-code", maxlength:"10", placeholder:"Enter code", value:S.authCode
   });
   codeInp.addEventListener("input",function(e){
-    /* digits only, max 6 */
-    var v = String(e.target.value||"").replace(/[^0-9]/g,"").slice(0,6);
+    /* digits only; allow up to 10 so 8-digit codes aren't truncated */
+    var v = String(e.target.value||"").replace(/[^0-9]/g,"").slice(0,10);
     S.authCode = v;
     e.target.value = v;
     if (S.authErr){ S.authErr=""; }
-    if (v.length === 6) verify();     // auto-submit when complete
   });
+  codeInp.addEventListener("keydown",function(e){ if(e.key==="Enter") verify(); });
 
   function go(){
     if (!isEmail(S.authEmail)){ S.authErr = T("badEmail"); render(); return; }
@@ -1396,8 +1398,8 @@ function viewWelcome(){
   }
 
   function verify(){
-    if ((S.authCode||"").length !== 6){
-      S.authErr = "Enter the 6-digit code"; render(); return;
+    if ((S.authCode||"").length < 6){
+      S.authErr = "Enter the code from your email"; render(); return;
     }
     if (S.verifying) return;
     S.authErr = ""; S.verifying = true; render();
@@ -1463,7 +1465,7 @@ function viewWelcome(){
             h("span",{style:"display:inline-flex;padding:13px;border-radius:14px;background:rgba(45,191,196,.16);color:var(--aqua);box-shadow:inset 0 0 0 1px rgba(143,240,182,.25)"},[icon("bell",22)]),
             h("h3",{class:"serif",style:"margin:14px 0 0;font-size:19px;color:var(--ink)"},["Enter your code"]),
             h("p",{style:"margin:8px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55"},
-              ["We've emailed a 6-digit code to ", h("b",{style:"color:var(--ink)"},[S.authEmail]),
+              ["We've emailed a sign-in code to ", h("b",{style:"color:var(--ink)"},[S.authEmail]),
                ". It expires in an hour."])
           ]),
           h("div",{style:"height:14px"}),
@@ -1484,7 +1486,7 @@ function viewWelcome(){
           input,
           S.authErr ? h("p",{style:"font-size:12.5px;color:#F0906A;margin:7px 0 0"},[S.authErr]) : null,
           h("p",{style:"font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.45"},
-            ["Enter your email and we'll send a 6-digit sign-in code. No password needed."]),
+            ["Enter your email and we'll send a sign-in code. No password needed."]),
           h("button",{class:"btn btn-aqua",style:"margin-top:13px;padding:14px",
             disabled: S.sending, onclick:go},
             [ S.sending ? "Sending…" : "Email me a sign-in code" ])
