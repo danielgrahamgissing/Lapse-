@@ -143,6 +143,8 @@
        padding:12px 14px;font-size:15px;color:var(--ink)}
   .inp:focus{outline:none;border-color:var(--aqua);box-shadow:0 0 0 2px rgba(45,191,196,.35)}
   .inp.bad{border-color:var(--ember);box-shadow:0 0 0 2px rgba(217,102,61,.3)}
+  .codeinp{text-align:center;font-size:26px;font-weight:700;letter-spacing:.34em;
+           font-family:Georgia,"Times New Roman",serif;padding:15px 10px;text-indent:.34em}
   .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .cat3{display:flex;gap:10px;justify-content:center}
   .cat3 .catbtn{flex:1;max-width:120px}
@@ -542,14 +544,31 @@ function itemToRow(it, userId){
   };
 }
 
-/* Send a magic link to the given email */
-function sendMagicLink(email, cb){
+/* Send a 6-digit sign-in code to the given email.
+   Omitting emailRedirectTo makes Supabase send a code rather than a link,
+   which matters for the installed app: a link opens the browser (a
+   separate session) and leaves the app still logged out. A code is typed
+   straight into whichever window the person is already using. */
+function sendCode(email, cb){
   if (!sb){ cb("offline"); return; }
   sb.auth.signInWithOtp({
     email: email,
-    options: { emailRedirectTo: window.location.origin }
+    options: { shouldCreateUser: true }
   }).then(function(res){
     cb(res.error ? (res.error.message || "error") : null);
+  }).catch(function(){ cb("error"); });
+}
+
+/* Check the code the person typed. On success Supabase creates the
+   session and fires SIGNED_IN, which the boot code picks up. */
+function verifyCode(email, token, cb){
+  if (!sb){ cb("offline"); return; }
+  sb.auth.verifyOtp({
+    email: email,
+    token: token,
+    type: "email"
+  }).then(function(res){
+    cb(res.error ? (res.error.message || "error") : null, res.data);
   }).catch(function(){ cb("error"); });
 }
 
@@ -1005,7 +1024,7 @@ function addDays(n){
 var S = {
   user:null, screen:"listing", plan:"free", active:null,
   paywall:false, toast:null, authMode:"signup", authEmail:"", authSent:false, authErr:"",
-  sending:false, magicSent:false, checkoutBusy:false,
+  sending:false, codeSent:false, authCode:"", verifying:false, checkoutBusy:false,
   pick:"monthly", notifyEmail:true, notifyPush:false,
   stage:"welcome",        // welcome -> pricing -> app
   trial:false,
@@ -1316,7 +1335,7 @@ function signOut(){
   S.user=null; S.stage="welcome"; S.screen="listing"; S.menu=false;
   S.active=null; S.paywall=false; S.trial=false; S.plan="free";
   S.items=[]; S.membership=null; S.authEmail=""; S.authErr="";
-  S.magicSent=false; S.sending=false;
+  S.codeSent=false; S.authCode=""; S.verifying=false; S.sending=false;
   S.contact={subject:"",body:"",sent:false,err:"",sending:false};
   render(); ping("Logged out");
 }
@@ -1348,17 +1367,58 @@ function viewWelcome(){
   });
   input.addEventListener("keydown",function(e){ if(e.key==="Enter") go(); });
 
+  /* 6-digit code entry, shown after the email has been sent */
+  var codeInp = h("input",{
+    class:"inp codeinp"+(S.authErr?" bad":""), type:"text", inputmode:"numeric",
+    autocomplete:"one-time-code", maxlength:"6", placeholder:"123456", value:S.authCode
+  });
+  codeInp.addEventListener("input",function(e){
+    /* digits only, max 6 */
+    var v = String(e.target.value||"").replace(/[^0-9]/g,"").slice(0,6);
+    S.authCode = v;
+    e.target.value = v;
+    if (S.authErr){ S.authErr=""; }
+    if (v.length === 6) verify();     // auto-submit when complete
+  });
+
   function go(){
     if (!isEmail(S.authEmail)){ S.authErr = T("badEmail"); render(); return; }
     S.authErr = ""; S.sending = true; render();
-    sendMagicLink(S.authEmail, function(err){
+    sendCode(S.authEmail, function(err){
       S.sending = false;
       if (err === "offline"){
         S.authErr = "Can't reach the server. Check your connection and try again.";
         render(); return;
       }
-      if (err){ S.authErr = "Couldn't send the link. Please try again."; render(); return; }
-      S.magicSent = true; render();
+      if (err){ S.authErr = "Couldn't send the code. Please try again."; render(); return; }
+      S.codeSent = true; S.authCode = ""; render();
+    });
+  }
+
+  function verify(){
+    if ((S.authCode||"").length !== 6){
+      S.authErr = "Enter the 6-digit code"; render(); return;
+    }
+    if (S.verifying) return;
+    S.authErr = ""; S.verifying = true; render();
+    verifyCode(S.authEmail, S.authCode, function(err){
+      S.verifying = false;
+      if (err){
+        S.authErr = "That code wasn't right. Check it and try again.";
+        S.authCode = ""; render(); return;
+      }
+      /* success — onAuthStateChange takes it from here */
+      render();
+    });
+  }
+
+  function resend(){
+    S.authErr = ""; S.authCode = ""; S.sending = true; render();
+    sendCode(S.authEmail, function(err){
+      S.sending = false;
+      S.authErr = err ? "Couldn't resend. Try again." : "";
+      if (!err) ping("New code sent");
+      render();
     });
   }
 
@@ -1398,25 +1458,36 @@ function viewWelcome(){
           wcard("camera",T("c4t"), T("c4b"))
         ]),
 
-        S.magicSent ? h("div",{class:"wform"},[
-          h("div",{style:"text-align:center;padding:6px 4px"},[
+        S.codeSent ? h("div",{class:"wform"},[
+          h("div",{style:"text-align:center;padding:2px 2px 0"},[
             h("span",{style:"display:inline-flex;padding:13px;border-radius:14px;background:rgba(45,191,196,.16);color:var(--aqua);box-shadow:inset 0 0 0 1px rgba(143,240,182,.25)"},[icon("bell",22)]),
-            h("h3",{class:"serif",style:"margin:14px 0 0;font-size:19px;color:var(--ink)"},["Check your email"]),
+            h("h3",{class:"serif",style:"margin:14px 0 0;font-size:19px;color:var(--ink)"},["Enter your code"]),
             h("p",{style:"margin:8px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55"},
-              ["We've sent a sign-in link to ", h("b",{style:"color:var(--ink)"},[S.authEmail]),
-               ". Tap it on this device to sign in. It can take a minute to arrive — check spam too."]),
-            h("button",{style:"margin-top:16px;font-size:13.5px;font-weight:600;color:var(--aqua)",
-              onclick:function(){ S.magicSent=false; render(); }},["Use a different email"])
+              ["We've emailed a 6-digit code to ", h("b",{style:"color:var(--ink)"},[S.authEmail]),
+               ". It expires in an hour."])
+          ]),
+          h("div",{style:"height:14px"}),
+          codeInp,
+          S.authErr ? h("p",{style:"font-size:12.5px;color:#F0906A;margin:9px 0 0;text-align:center"},[S.authErr]) : null,
+          h("button",{class:"btn btn-aqua",style:"margin-top:13px;padding:14px",
+            disabled:S.verifying, onclick:verify},
+            [ S.verifying ? "Checking…" : "Sign in" ]),
+          h("div",{style:"display:flex;gap:14px;justify-content:center;margin-top:12px"},[
+            h("button",{style:"font-size:13px;font-weight:600;color:var(--aqua)",
+              disabled:S.sending, onclick:resend},[ S.sending ? "Sending…" : "Resend code" ]),
+            h("button",{style:"font-size:13px;font-weight:600;color:var(--muted)",
+              onclick:function(){ S.codeSent=false; S.authCode=""; S.authErr=""; render(); }},
+              ["Change email"])
           ])
         ]) : h("div",{class:"wform"},[
           h("label",{class:"wlabel"},[T("emailLabel")]),
           input,
           S.authErr ? h("p",{style:"font-size:12.5px;color:#F0906A;margin:7px 0 0"},[S.authErr]) : null,
           h("p",{style:"font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.45"},
-            ["Enter your email and we'll send a secure sign-in link. No password needed."]),
+            ["Enter your email and we'll send a 6-digit sign-in code. No password needed."]),
           h("button",{class:"btn btn-aqua",style:"margin-top:13px;padding:14px",
             disabled: S.sending, onclick:go},
-            [ S.sending ? "Sending…" : "Send me a sign-in link" ])
+            [ S.sending ? "Sending…" : "Email me a sign-in code" ])
         ]),
 
         h("p",{class:"wnote"},[T("privacy")]),
