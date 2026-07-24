@@ -598,11 +598,24 @@ function updateContract(id, item, cb){
     .catch(function(){ cb(false); });
 }
 
-/* Delete a contract by id */
+/* Delete a contract, and tidy up its files in storage first.
+   The database rows (file records, reminder history) are removed
+   automatically by the foreign keys, but the stored files themselves
+   would otherwise linger in the bucket taking up space. */
 function deleteContract(id, cb){
   if (!sb || !S.user){ cb(false); return; }
-  sb.from("contracts").delete().eq("id", id)
-    .then(function(res){ cb(!res.error); })
+
+  sb.from("contract_files").select("path").eq("contract_id", id)
+    .then(function(res){
+      var paths = (res && res.data ? res.data : []).map(function(r){ return r.path; });
+      if (!paths.length) return null;
+      return sb.storage.from("contract-files").remove(paths);
+    })
+    .catch(function(){ return null; })      // storage tidy-up is best-effort
+    .then(function(){
+      return sb.from("contracts").delete().eq("id", id);
+    })
+    .then(function(res){ cb(!res || !res.error); })
     .catch(function(){ cb(false); });
 }
 
@@ -613,6 +626,112 @@ function loadProfile(cb){
     .then(function(res){ cb(res.error ? null : res.data); })
     .catch(function(){ cb(null); });
 }
+
+/* ---------- File attachments ----------
+   Photos are compressed before upload (a phone photo is often 3-5MB;
+   a legible photo of a certificate is a few hundred KB). PDFs go up
+   as-is. Files live in Supabase Storage under a folder named after the
+   user's id, which is what the storage policies check. */
+
+var MAX_UPLOAD_BYTES = 10 * 1024 * 1024;   // 10MB before compression
+
+/* Shrink a photo: cap the long edge and re-encode as JPEG. */
+function compressImage(file, cb){
+  try {
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var img = new Image();
+      img.onload = function(){
+        var MAX = 1600;
+        var w = img.width, h = img.height;
+        if (w > MAX || h > MAX){
+          if (w > h){ h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        var canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob(function(blob){
+          cb(blob || file);
+        }, "image/jpeg", 0.72);
+      };
+      img.onerror = function(){ cb(file); };   // fall back to the original
+      img.src = e.target.result;
+    };
+    reader.onerror = function(){ cb(file); };
+    reader.readAsDataURL(file);
+  } catch(err){ cb(file); }
+}
+
+/* Upload one file and record it against a contract. */
+function uploadFile(contractId, file, kind, cb){
+  if (!sb || !S.user){ cb("offline"); return; }
+  if (file.size > MAX_UPLOAD_BYTES){ cb("too-big"); return; }
+
+  function put(blob, filename){
+    var ext = kind === "photo" ? "jpg"
+            : (filename.split(".").pop() || "pdf").toLowerCase().slice(0,5);
+    var path = S.user.id + "/" + contractId + "/" + Date.now() + "." + ext;
+
+    sb.storage.from("contract-files").upload(path, blob, {
+      contentType: kind === "photo" ? "image/jpeg" : (file.type || "application/pdf"),
+      upsert: false
+    }).then(function(res){
+      if (res.error){ cb(res.error.message || "upload-failed"); return; }
+      sb.from("contract_files").insert({
+        contract_id: contractId,
+        user_id: S.user.id,
+        path: path,
+        name: filename,
+        kind: kind,
+        size_bytes: blob.size
+      }).select().single().then(function(r2){
+        cb(r2.error ? "record-failed" : null, r2.data);
+      }).catch(function(){ cb("record-failed"); });
+    }).catch(function(){ cb("upload-failed"); });
+  }
+
+  if (kind === "photo" && /^image\//.test(file.type || "")){
+    compressImage(file, function(blob){ put(blob, file.name || "photo.jpg"); });
+  } else {
+    put(file, file.name || "document.pdf");
+  }
+}
+
+/* List the files attached to a contract. */
+function loadFiles(contractId, cb){
+  if (!sb || !S.user){ cb([]); return; }
+  sb.from("contract_files").select("*")
+    .eq("contract_id", contractId)
+    .order("created_at", {ascending:true})
+    .then(function(res){ cb(res.error ? [] : (res.data||[])); })
+    .catch(function(){ cb([]); });
+}
+
+/* Remove a file from storage and from the records table. */
+function deleteFile(fileRow, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.storage.from("contract-files").remove([fileRow.path])
+    .then(function(){
+      return sb.from("contract_files").delete().eq("id", fileRow.id);
+    })
+    .then(function(res){ cb(!res || !res.error); })
+    .catch(function(){ cb(false); });
+}
+
+/* Files are private, so opening one needs a short-lived signed URL. */
+function openFile(fileRow){
+  if (!sb){ ping("Can't reach the server"); return; }
+  sb.storage.from("contract-files").createSignedUrl(fileRow.path, 60)
+    .then(function(res){
+      if (res.error || !res.data || !res.data.signedUrl){
+        ping("Couldn't open that file"); return;
+      }
+      window.open(res.data.signedUrl, "_blank");
+    })
+    .catch(function(){ ping("Couldn't open that file"); });
+}
+
 
 
 /* ---- Install-to-home-screen support ----
@@ -1025,6 +1144,7 @@ var S = {
   user:null, screen:"listing", plan:"free", active:null,
   paywall:false, toast:null, authMode:"signup", authEmail:"", authSent:false, authErr:"",
   sending:false, codeSent:false, authCode:"", verifying:false, checkoutBusy:false,
+  uploading:false, confirmDelete:null, deleting:false,
   pick:"monthly", notifyEmail:true, notifyPush:false,
   stage:"welcome",        // welcome -> pricing -> app
   trial:false,
@@ -1859,6 +1979,11 @@ function listRow(item){
 
 function openItem(item){
   S.active = item; S.screen = "detail"; render();
+  /* Fetch the attachment list for this contract. */
+  loadFiles(item.id, function(files){
+    item.files = files;
+    if (S.active && S.active.id === item.id) render();
+  });
 }
 function tryAdd(){
   if (!canAdd()){
@@ -1923,25 +2048,52 @@ function viewEdit(){
     return b;
   });
 
-  /* Attachments. In the preview these are placeholders — a real build
-     needs file storage before anything actually persists. */
-  function addFile(kind){
-    f.files = (f.files||[]).concat([{
-      name: kind==="photo"
-        ? "photo-"+((f.files||[]).filter(function(x){return x.kind==="photo";}).length+1)+".jpg"
-        : "document-"+((f.files||[]).filter(function(x){return x.kind==="doc";}).length+1)+".pdf",
-      kind: kind
-    }]);
-    render();
-    ping(kind==="photo" ? "Photo attached" : "Document attached");
+  /* Attachments. Files attach to a saved contract, so on a brand-new
+     contract we ask the user to save first — there's no id to attach to
+     until then. */
+  function pickFile(kind){
+    if (!isEdit || !S.active){
+      ping("Save the contract first, then add photos or documents");
+      return;
+    }
+    var contractId = S.active.id;
+    var picker = document.createElement("input");
+    picker.type = "file";
+    if (kind === "photo"){
+      picker.accept = "image/*";
+      picker.setAttribute("capture", "environment");   // prefer rear camera
+    } else {
+      picker.accept = "application/pdf,image/*";
+    }
+    picker.addEventListener("change", function(){
+      var file = picker.files && picker.files[0];
+      if (!file) return;
+      S.uploading = true; render();
+      uploadFile(contractId, file, kind, function(err, row){
+        S.uploading = false;
+        if (err === "too-big"){ ping("That file is too large (max 10MB)"); render(); return; }
+        if (err){ ping("Couldn't upload — check your connection"); render(); return; }
+        f.files = (f.files || []).concat([row]);
+        render();
+        ping(kind === "photo" ? "Photo attached" : "Document attached");
+      });
+    });
+    picker.click();
   }
 
-  var fileRows = (f.files||[]).map(function(fl,idx){
+  var fileRows = (f.files||[]).map(function(fl){
     return h("div",{class:"filerow"},[
       h("span",{style:"display:flex;color:#1B7F87"},[icon(fl.kind==="photo"?"camera":"file",15)]),
-      h("span",{class:"nm"},[fl.name]),
+      h("button",{class:"nm",style:"text-align:left;color:var(--ink)",
+        onclick:function(){ openFile(fl); }},[fl.name]),
       h("button",{style:"padding:5px;color:var(--faint)","aria-label":"Remove",
-        onclick:function(){ f.files=f.files.filter(function(_,i){return i!==idx;}); render(); }},
+        onclick:function(){
+          var keep = f.files.filter(function(x){ return x.id !== fl.id; });
+          f.files = keep; render();
+          deleteFile(fl, function(ok){
+            if (!ok) ping("Couldn't delete on the server");
+          });
+        }},
         [icon("x",15)])
     ]);
   });
@@ -2006,14 +2158,18 @@ function viewEdit(){
       field(T("description"),[noteInp]),
       field(T("photosDocs"), [
         h("div",{style:"display:flex;gap:9px;margin-bottom:"+(fileRows.length?"10px":"0")},[
-          h("button",{class:"attachbtn",onclick:function(){ addFile("photo"); }},
-            [icon("camera",19),T("takePhoto")]),
-          h("button",{class:"attachbtn",onclick:function(){ addFile("doc"); }},
-            [icon("clip",19),T("uploadFile")])
+          h("button",{class:"attachbtn",disabled:S.uploading,
+            onclick:function(){ pickFile("photo"); }},
+            [icon("camera",19), S.uploading ? "Uploading…" : T("takePhoto")]),
+          h("button",{class:"attachbtn",disabled:S.uploading,
+            onclick:function(){ pickFile("doc"); }},
+            [icon("clip",19), S.uploading ? "Uploading…" : T("uploadFile")])
         ])
       ].concat(fileRows).concat([
         h("p",{style:"font-size:12px;color:var(--muted);margin:9px 0 0;line-height:1.5"},
-          ["Keep the certificate or policy here so it's to hand when you need it."])
+          [ isEdit
+            ? "Keep the certificate or policy here so it's to hand when you need it. Photos are compressed; max 10MB."
+            : "Save this contract first, then you can attach photos and documents." ])
       ])),
       field(T("remindLabel"), [
         h("div",{class:"remindgrid"},
@@ -2056,7 +2212,8 @@ function viewDetail(){
   function metaRow(k,v){ return h("div",{class:"kv"},[h("dt",{},[k]),h("dd",{},[v])]); }
 
   var fileRows = (item.files||[]).map(function(fl){
-    return h("div",{class:"filerow"},[
+    return h("button",{class:"filerow",style:"width:100%;text-align:left",
+      onclick:function(){ openFile(fl); }},[
       h("span",{style:"display:flex;color:#1B7F87"},[icon(fl.kind==="photo"?"camera":"file",15)]),
       h("span",{class:"nm"},[fl.name]),
       h("span",{style:"font-size:11.5px;color:#1B7F87;font-weight:600"},["View"])
@@ -2126,12 +2283,7 @@ function viewDetail(){
             ["Nothing attached yet. Tap Edit to add a photo or upload a document."]),
 
       h("button",{class:"danger",style:"margin-top:22px",onclick:function(){
-        var id = item.id;
-        S.items = S.items.filter(function(i){ return i.id !== id; });
-        S.active=null; S.screen="listing"; render(); ping("Deleted");
-        deleteContract(id, function(ok){
-          if (!ok) ping("Couldn't delete on the server — check connection");
-        });
+        S.confirmDelete = item; render();
       }},[icon("trash",15),T("deleteItem")])
     ])
   ];
@@ -2403,6 +2555,53 @@ function viewInstallPrompt(){
 }
 
 /* iOS manual instructions sheet */
+/* Confirm before deleting a contract — it takes the attachments and
+   reminder history with it, and there's no undo. */
+function viewConfirmDelete(){
+  var item = S.confirmDelete;
+  if (!item) return null;
+  var fileCount = (item.files || []).length;
+
+  return h("div",{class:"modalscrim",onclick:function(e){
+    if (e.target && e.target.className==="modalscrim"){ S.confirmDelete=null; render(); }
+  }},[
+    h("div",{class:"modal"},[
+      h("div",{style:"display:flex;justify-content:center"},[
+        h("span",{style:"display:inline-flex;padding:14px;border-radius:16px;background:rgba(217,102,61,.16);color:#F0906A"},
+          [icon("trash",24)])
+      ]),
+      h("h2",{class:"serif",style:"margin:16px 0 0;font-size:20px;color:var(--ink);text-align:center"},
+        ["Delete this contract?"]),
+      h("p",{style:"margin:10px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55;text-align:center"},
+        [ h("b",{style:"color:var(--ink)"},[item.name]),
+          " will be removed permanently",
+          fileCount ? ", along with " + fileCount + (fileCount===1?" attached file":" attached files") : "",
+          ". This can't be undone." ]),
+      h("button",{class:"btn",style:"margin-top:18px;padding:13px;background:#C2542F;color:#fff;font-weight:700",
+        disabled:S.deleting,
+        onclick:function(){
+          if (S.deleting) return;
+          S.deleting = true; render();
+          var id = item.id;
+          deleteContract(id, function(ok){
+            S.deleting = false;
+            S.confirmDelete = null;
+            if (ok){
+              S.items = S.items.filter(function(i){ return i.id !== id; });
+              S.active = null; S.screen = "listing";
+              render(); ping("Contract deleted");
+            } else {
+              render(); ping("Couldn't delete — check your connection");
+            }
+          });
+        }},
+        [ S.deleting ? "Deleting…" : "Yes, delete it" ]),
+      h("button",{style:"width:100%;margin-top:9px;padding:11px;font-size:14px;font-weight:600;color:var(--muted)",
+        onclick:function(){ S.confirmDelete=null; render(); }},["Keep it"])
+    ])
+  ]);
+}
+
 function viewIosInstall(){
   return h("div",{class:"modalscrim",onclick:function(e){
     if (e.target && e.target.className==="modalscrim"){ S.iosInstall=false; render(); }
@@ -2456,6 +2655,7 @@ function render(){
   if (S.paywall && S.user) app.appendChild(viewPaywall());
   if (S.installPrompt && S.user && S.stage === "app") app.appendChild(viewInstallPrompt());
   if (S.iosInstall) app.appendChild(viewIosInstall());
+  if (S.confirmDelete) app.appendChild(viewConfirmDelete());
 
   if (S.toast){
     app.appendChild(h("div",{class:"toast fade"},[icon("check",15,"#5EE7D0"), S.toast]));
