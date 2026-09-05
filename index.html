@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Lapse</title>
+<title>Lapse HQ</title>
 <meta name="theme-color" content="#061A20">
 <meta name="color-scheme" content="dark">
 <meta name="supported-color-schemes" content="dark">
@@ -157,7 +157,7 @@
          border:1px solid rgba(14,58,68,.08);color:var(--muted)}
   .chip2.on{background:var(--aqua);color:#04262D;border-color:var(--aqua)}
   .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .hint{font-size:12.5px;color:var(--muted);line-height:1.55;background:var(--card);
+  .hint{font-size:12.5px;color:var(--muted);line-height:1.55;background:var(--card);text-align:center;
         border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0}
   .remindgrid{display:flex;flex-direction:column;gap:8px}
   .remindchip{width:100%;display:flex;align-items:center;gap:11px;padding:12px 14px;
@@ -209,6 +209,10 @@
   .brandinline{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;min-width:0}
   .brandinline span{font-family:Georgia,serif;font-size:15px;font-weight:700;
                     letter-spacing:.16em;color:#fff;line-height:1}
+  .hqtag{font-size:.52em;font-weight:700;letter-spacing:.08em;vertical-align:super;
+         margin-left:.18em;color:var(--aqua);
+         text-shadow:0 0 8px rgba(45,191,196,.55)}
+  .hqtag-lg{font-size:.34em;margin-left:.16em}
   .navbtn{background:rgba(255,255,255,.16)}
   .navbtn:hover{background:rgba(255,255,255,.26)}
   .appbar>.glow{position:absolute;top:-120px;right:-80px;width:190px;height:190px;opacity:.24}
@@ -263,7 +267,7 @@
           font-size:13.5px;font-weight:600;color:var(--ink);background:var(--card);
           border:var(--lumtrim);box-shadow:var(--cardglow);backdrop-filter:blur(8px)}
   .pdfbtn:hover{border-color:var(--aqua);color:var(--aqua)}
-  .pagetitle{margin:10px 16px 12px;padding:15px 17px;background:var(--card);
+  .pagetitle{margin:10px 16px 12px;padding:15px 17px;background:var(--card);text-align:center;
              border-radius:18px;border:1px solid var(--line);
              box-shadow:var(--cardglow)}
 
@@ -325,11 +329,11 @@
   .mission-hero h2{margin:12px 0 0;font-family:Georgia,serif;font-size:22px;line-height:1.2;color:var(--ink)}
   .mission-hero p{margin:8px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55}
   .vcard{background:var(--card);border-radius:16px;padding:15px;margin-bottom:10px;
-         border:var(--lumtrim);box-shadow:var(--cardglow);backdrop-filter:blur(8px)}
-  .vcard h3{margin:0;font-size:14.5px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:9px}
+         border:var(--lumtrim);box-shadow:var(--cardglow);backdrop-filter:blur(8px);text-align:center}
+  .vcard h3{margin:0;font-size:14.5px;font-weight:600;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:9px}
   .vcard p{margin:7px 0 0;font-size:13px;color:var(--muted);line-height:1.55}
   .missionstatement{padding:18px 17px}
-  .missionstatement p{margin:0 0 13px;font-size:14px;color:var(--ink);line-height:1.62}
+  .missionstatement p{margin:0 0 13px;font-size:14px;color:var(--ink);line-height:1.62;text-align:center}
   .missionstatement p:last-child{margin-bottom:0;color:var(--lumin);font-weight:500}
 
   /* attachments */
@@ -481,7 +485,62 @@
     .fade{animation:none}
     body::after{animation:none}
     button{transition:none}
+    .pageslide{animation:none}
   }
+
+  /* ---- fine futuristic detail ---- */
+  /* faint dot-grid over the whole surface, like an interface substrate */
+  .phone::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:radial-gradient(rgba(143,240,182,.05) 0.5px, transparent 0.5px);
+    background-size:22px 22px;opacity:.6;}
+
+  /* cards: crisper edge, faint corner brackets, deeper float */
+  .lrow,.vcard,.wcard,.mcard,.meta,.panel,.paycard,.bigbox,.dhead,.pagetitle,.empty,.plan{
+    box-shadow:0 1px 0 rgba(143,240,182,.08) inset,
+               0 12px 32px -18px rgba(0,0,0,.7),
+               0 0 0 0.5px rgba(143,240,182,.10) !important;}
+  /* HUD corner ticks, top-left + bottom-right, on the richer cards */
+  .lrow::after,.pagetitle::after,.bigbox::after{content:"";position:absolute;
+    width:11px;height:11px;pointer-events:none;opacity:.5;}
+  .lrow::after{right:10px;bottom:10px;
+    border-right:1.5px solid var(--lumin-soft);border-bottom:1.5px solid var(--lumin-soft);
+    border-bottom-right-radius:4px;}
+
+  /* card top hairline: brighter, thinner, more precise */
+  .lrow::before,.vcard::before,.wcard::before,.bigbox::before,.dhead::before,.pagetitle::before{
+    left:16px;right:16px;opacity:.75;height:1px;}
+
+  /* aqua buttons: add a moving sheen sweep */
+  .btn-aqua,.addbtn{position:relative;overflow:hidden}
+  .btn-aqua::before,.addbtn::before{content:"";position:absolute;top:0;bottom:0;left:-40%;
+    width:35%;pointer-events:none;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,.28), transparent);
+    transform:skewX(-18deg);animation:sheen 6s ease-in-out infinite;}
+  @keyframes sheen{
+    0%,72%{left:-40%}
+    88%,100%{left:130%}}
+
+  /* status pills and cost tags: subtle glow to read as "live data" */
+  .pill{box-shadow:0 0 12px -4px currentColor}
+  .costtag{text-shadow:0 0 10px rgba(45,191,196,.25)}
+
+  /* section labels: monospace-ish tracking, like a readout */
+  .seclbl{border:1px solid rgba(143,240,182,.16);
+    box-shadow:0 0 14px -6px rgba(45,191,196,.5) inset}
+
+  /* ---- page dots (swipe indicator) ---- */
+  .pagedots{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:8px;
+    justify-content:center;z-index:40;pointer-events:auto}
+  .pagedot{width:7px;height:7px;border-radius:50%;padding:0;
+    background:rgba(143,240,182,.28);transition:all .25s ease}
+  .pagedot.on{background:var(--aqua);width:22px;border-radius:99px;
+    box-shadow:0 0 12px -2px rgba(45,191,196,.8)}
+
+  /* ---- page slide-in on swipe/nav between main pages ---- */
+  .pageslide-right{animation:slideR .28s cubic-bezier(.2,.8,.3,1) both}
+  .pageslide-left{animation:slideL .28s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes slideR{from{opacity:0;transform:translateX(7%)}to{opacity:1;transform:none}}
+  @keyframes slideL{from{opacity:0;transform:translateX(-7%)}to{opacity:1;transform:none}}
 
   .installicon{width:76px;height:76px;border-radius:18px;background:#0A2E36;
                border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;
@@ -1144,7 +1203,7 @@ var S = {
   user:null, screen:"listing", plan:"free", active:null,
   paywall:false, toast:null, authMode:"signup", authEmail:"", authSent:false, authErr:"",
   sending:false, codeSent:false, authCode:"", verifying:false, checkoutBusy:false,
-  uploading:false, confirmDelete:null, deleting:false,
+  uploading:false, confirmDelete:null, deleting:false, swipeFrom:null,
   pick:"monthly", notifyEmail:true, notifyPush:false,
   stage:"welcome",        // welcome -> pricing -> app
   trial:false,
@@ -1191,7 +1250,7 @@ function startApp(asTrial){
   S.membership = asTrial ? null : {
     plan: S.pick,
     since: TODAY.toISOString().slice(0,10),
-    renews: addMonths(TODAY.toISOString().slice(0,10), S.pick==="annual"?12:1),
+    renews: addMonths(TODAY.toISOString().slice(0,10), 1),
     cancelled:false, expires:null
   };
   S.stage  = "app";
@@ -1357,7 +1416,9 @@ function appBar(){
       h("button",{class:"iconbtn2","aria-label":T("language"),
         onclick:function(){ S.langPicker=true; render(); }},
         [ h("span",{class:"flag"},[curLang().flag]) ]),
-      h("div",{class:"brandinline"},[ mark(26), h("span",{},["LAPSE"]) ]),
+      h("div",{class:"brandinline"},[ mark(26),
+        h("span",{class:"wordmark"},[ "LAPSE", h("sup",{class:"hqtag"},["HQ"]) ])
+      ]),
       h("button",{class:"iconbtn2 navbtn","aria-label":"Menu",
         onclick:function(){ S.menu=true; render(); }},[icon("menu",19)])
     ])
@@ -1567,7 +1628,7 @@ function viewWelcome(){
       h("div",{class:"wel-in"},[
         h("div",{class:"wel-hero"},[
           mark(72),
-          h("h1",{},["LAPSE"]),
+          h("h1",{},[ "LAPSE", h("sup",{class:"hqtag hqtag-lg"},["HQ"]) ]),
           h("p",{},[T("tagline")])
         ]),
 
@@ -1663,7 +1724,7 @@ function viewPricing(){
       }},[icon("back",20)]),
       h("div",{style:"flex:1;display:flex;flex-direction:column;align-items:center;gap:1px"},[
         mark(26),
-        h("span",{style:"font-family:Georgia,serif;font-size:9.5px;font-weight:700;letter-spacing:.19em;color:var(--ink)"},["LAPSE"])
+        h("span",{style:"font-family:Georgia,serif;font-size:9.5px;font-weight:700;letter-spacing:.19em;color:var(--ink)"},["LAPSE HQ"])
       ]),
       h("button",{class:"iconbtn2",style:"background:rgba(45,191,196,.14);color:#1B7F87","aria-label":T("language"),
         onclick:function(){ S.langPicker=true; render(); }},[h("span",{class:"flag"},[curLang().flag])])
@@ -1675,8 +1736,7 @@ function viewPricing(){
           [T("planSub")])
       ]),
 
-      planCard("monthly",T("monthly"),"£1",T("perMonth"),T("noContract"),null),
-      planCard("annual",T("annual"),"£9.99",T("perYear"),T("cancelAny"),T("save17")),
+      planCard("monthly",T("monthly"),"£1.99",T("perMonth"),T("noContract"),null),
 
       h("div",{style:"margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:15px 16px;box-shadow:var(--cardglow)"},
         [T("unlimited"),T("pushEmail"),T("seeCost"),T("cancelAnytime")].map(function(f){
@@ -1696,7 +1756,7 @@ function viewPricing(){
       h("button",{class:"btn btn-aqua",disabled:S.checkoutBusy,onclick:function(){
         goCheckout(S.pick);
       }},[ S.checkoutBusy ? "Redirecting to secure checkout…"
-           : (S.pick==="annual" ? T("annual")+" — £9.99" : T("monthly")+" — £1") ]),
+           : "Subscribe — £1.99 a month" ]),
       h("p",{style:"text-align:center;font-size:12px;color:rgba(207,243,239,.72);margin:12px 6px 0;line-height:1.6"},
         ["Secure payment by Stripe. Cancel anytime from your profile."])
     ])
@@ -1735,8 +1795,8 @@ function viewListing(){
       style: full ? "border-color:rgba(224,169,59,.5)" : "",
       onclick:function(){ S.paywall=true; render(); }},[
       h("p",{class:"t"},[ full ? T("threeUsed") : S.items.length+" "+T("ofFree") ]),
-      h("p",{class:"s"},[ full ? "Subscribe from £1 a month to keep adding. Your three stay put."
-                               : "Most households track about twelve. From £1 a month for the lot." ])
+      h("p",{class:"s"},[ full ? "Subscribe for £1.99 a month to keep adding. Your three stay put."
+                               : "Most households track about twelve. Just £1.99 a month for the lot." ])
     ]));
   }
 
@@ -2304,13 +2364,13 @@ function viewProfile(){
             h("p",{style:"margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.16em;font-weight:700;color:#7FD9D6"},
               [ m.cancelled ? T("endingSoon") : T("activeMembership") ]),
             h("p",{class:"serif",style:"margin:5px 0 0;font-size:21px;color:#fff"},
-              [ m.plan==="annual" ? "Annual" : "Monthly" ])
+              [ "Monthly" ])
           ]),
           h("div",{style:"text-align:right"},[
             h("p",{class:"serif",style:"margin:0;font-size:23px;font-weight:600;color:#fff"},
-              [ m.plan==="annual" ? "£9.99" : "£1" ]),
+              [ "£1.99" ]),
             h("p",{style:"margin:0;font-size:11px;color:rgba(255,255,255,.5)"},
-              [ m.plan==="annual" ? "a year" : "a month" ])
+              [ "a month" ])
           ])
         ]),
         m.cancelled
@@ -2357,7 +2417,7 @@ function viewProfile(){
   if (m){
     rows.push(h("div",{class:"kv"},[h("dt",{},[T("memberSince")]),h("dd",{},[fmtDate(m.since)])]));
     rows.push(h("div",{class:"kv"},[h("dt",{},[T("plan")]),
-      h("dd",{},[ m.plan==="annual" ? "Annual — £9.99" : "Monthly — £1" ])]));
+      h("dd",{},[ "Monthly — £1.99" ])]));
     rows.push(h("div",{class:"kv"},[
       h("dt",{},[ m.cancelled ? T("accessUntil") : T("nextPayment") ]),
       h("dd",{},[ fmtDate(m.cancelled ? m.expires : m.renews) ])]));
@@ -2510,15 +2570,14 @@ function viewPaywall(){
           onclick:function(){ S.paywall=false; render(); }},[icon("x",20)])
       ]),
       h("div",{style:"margin-top:20px"},[
-        planRow("monthly","Monthly","£1","a month","No contract, cancel anytime",null),
-        planRow("annual","Annual","£9.99","a year","Cancel anytime · 83p a month","Save 17%")
+        planRow("monthly","Monthly","£1.99","a month","No contract, cancel anytime",null)
       ]),
       h("div",{style:"margin-top:20px"}, feats.map(function(f){
         return h("div",{class:"feat"},[icon("check",15,"#1B7F87"),f]);
       })),
       h("button",{class:"btn btn-aqua",style:"margin-top:24px",onclick:function(){
         goCheckout(S.pick);
-      }},[ S.pick==="annual" ? "Continue — £9.99 a year" : "Continue — £1 a month" ]),
+      }},[ "Continue — £1.99 a month" ]),
       h("p",{style:"text-align:center;font-size:12px;color:var(--faint);margin:10px 0 0"},
         ["Cancel any time. We'll email before the trial ends."])
     ])
@@ -2624,6 +2683,7 @@ function viewIosInstall(){
 }
 
 /* ---------- render ---------- */
+var MAIN_PAGES = ["listing", "profile", "mission"];
 function render(){
   var app = document.getElementById("app");
   app.innerHTML = "";
@@ -2649,6 +2709,27 @@ function render(){
 
   kids.forEach(function(k){ if(k) app.appendChild(k); });
 
+  /* Slide the new page in from the swipe direction */
+  if (S.swipeFrom && app.children.length){
+    var slideClass = S.swipeFrom === "right" ? "pageslide-right" : "pageslide-left";
+    for (var ci=0; ci<app.children.length; ci++){
+      var el = app.children[ci];
+      if (el && el.classList) el.classList.add(slideClass);
+    }
+  }
+
+  /* Page dots on the three swipeable pages */
+  if (S.user && S.stage === "app" && MAIN_PAGES.indexOf(S.screen) > -1){
+    var pidx = MAIN_PAGES.indexOf(S.screen);
+    app.appendChild(h("div",{class:"pagedots"},
+      MAIN_PAGES.map(function(pg,i){
+        return h("button",{class:"pagedot"+(i===pidx?" on":""),"aria-label":pg,
+          onclick:function(){ S.screen=pg; S.swipeFrom=null; render(); }});
+      })
+    ));
+    S.swipeFrom = null;
+  }
+
   if (S.menu && S.user && S.stage === "app") app.appendChild(viewNav());
   if (S.langPicker) app.appendChild(viewLangPicker());
   if (S.sortPicker && S.user) app.appendChild(viewSortPicker());
@@ -2660,6 +2741,49 @@ function render(){
   if (S.toast){
     app.appendChild(h("div",{class:"toast fade"},[icon("check",15,"#5EE7D0"), S.toast]));
   }
+}
+
+/* ---- Swipe between the three main pages ----
+   Left/right finger swipes move through Contracts, Profile and Mission,
+   in that order. Only active on those pages (not edit/detail/welcome),
+   and ignored when a menu or sheet is open, or when a horizontal scroll
+   (like the category chips) is the real target. */
+var touchStartX = 0, touchStartY = 0, touchTracking = false;
+
+function anyOverlayOpen(){
+  return S.menu || S.langPicker || S.sortPicker || S.paywall ||
+         S.installPrompt || S.iosInstall || S.confirmDelete;
+}
+
+function onTouchStart(e){
+  if (!S.user || S.stage !== "app") { touchTracking = false; return; }
+  if (MAIN_PAGES.indexOf(S.screen) === -1) { touchTracking = false; return; }
+  if (anyOverlayOpen()) { touchTracking = false; return; }
+  var t = e.touches && e.touches[0];
+  if (!t) return;
+  touchStartX = t.clientX; touchStartY = t.clientY; touchTracking = true;
+}
+
+function onTouchEnd(e){
+  if (!touchTracking) return;
+  touchTracking = false;
+  var t = e.changedTouches && e.changedTouches[0];
+  if (!t) return;
+  var dx = t.clientX - touchStartX;
+  var dy = t.clientY - touchStartY;
+  /* must be a clear horizontal swipe, not a vertical scroll or a tap */
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.7) return;
+  var idx = MAIN_PAGES.indexOf(S.screen);
+  if (dx < 0 && idx < MAIN_PAGES.length - 1){
+    S.screen = MAIN_PAGES[idx + 1]; S.swipeFrom = "right"; render();
+  } else if (dx > 0 && idx > 0){
+    S.screen = MAIN_PAGES[idx - 1]; S.swipeFrom = "left"; render();
+  }
+}
+
+if (typeof document !== "undefined" && document.body && document.body.addEventListener){
+  document.body.addEventListener("touchstart", onTouchStart, {passive:true});
+  document.body.addEventListener("touchend", onTouchEnd, {passive:true});
 }
 
 /* ---- Boot: check for a logged-in session, then show the right screen ----
