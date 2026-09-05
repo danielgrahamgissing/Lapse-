@@ -529,12 +529,31 @@
     box-shadow:0 0 14px -6px rgba(45,191,196,.5) inset}
 
   /* ---- page dots (swipe indicator) ---- */
-  .pagedots{position:fixed;left:0;right:0;bottom:14px;display:flex;gap:8px;
+  .pagedots{position:fixed;left:0;right:0;bottom:70px;display:flex;gap:8px;
     justify-content:center;z-index:40;pointer-events:auto}
   .pagedot{width:7px;height:7px;border-radius:50%;padding:0;
     background:rgba(143,240,182,.28);transition:all .25s ease}
   .pagedot.on{background:var(--aqua);width:22px;border-radius:99px;
     box-shadow:0 0 12px -2px rgba(45,191,196,.8)}
+
+  /* ---- social links bar ---- */
+  .socialbar{display:flex;gap:16px;justify-content:center;align-items:center;
+    padding:20px 16px 26px;margin-top:8px}
+  .socialbtn{width:44px;height:44px;border-radius:50%;display:flex;
+    align-items:center;justify-content:center;flex-shrink:0;
+    background:var(--card);border:var(--lumtrim);color:var(--aqua);
+    box-shadow:0 6px 18px -10px rgba(0,0,0,.6),
+               inset 0 0 0 1px rgba(143,240,182,.12),
+               0 0 16px -8px rgba(45,191,196,.5);
+    -webkit-tap-highlight-color:transparent;transition:transform .18s ease,
+    box-shadow .18s ease,color .18s ease}
+  .socialbtn:hover,.socialbtn:active{transform:translateY(-2px);color:var(--mint);
+    box-shadow:0 10px 24px -12px rgba(0,0,0,.7),
+               inset 0 0 0 1px rgba(143,240,182,.25),
+               0 0 22px -6px rgba(45,191,196,.75)}
+  .socialspin{display:flex;animation:socialSpin 14s linear infinite}
+  @keyframes socialSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){ .socialspin{animation:none} }
 
   /* ---- page slide-in on swipe/nav between main pages ---- */
   .pageslide-right{animation:slideR .28s cubic-bezier(.2,.8,.3,1) both}
@@ -916,6 +935,10 @@ var ICONS = {
   infoC:[[12,12,10]],
   globe:["M2 12h20","M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"],
   briefcase:["M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16","M4 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"],
+  instagram:["M17 2H7a5 5 0 0 0-5 5v10a5 5 0 0 0 5 5h10a5 5 0 0 0 5-5V7a5 5 0 0 0-5-5Z","M16 11.4a4 4 0 1 1-4.6-3.3 4 4 0 0 1 4.6 3.3Z"],
+  instagramC:[[17.5,6.5,0.6]],
+  facebook:["M15 3h-2.5A3.5 3.5 0 0 0 9 6.5V9H6.5v3H9v9h3v-9h2.5l.5-3H12V6.8c0-.7.3-1.1 1.1-1.1H15V3Z"],
+  tiktok:["M14 3v11.5a3.5 3.5 0 1 1-3.5-3.5c.35 0 .7.05 1 .15","M14 3a5 5 0 0 0 5 5"],
   sort:["M3 6h11","M3 12h8","M3 18h5","M16 16l3 3 3-3","M19 19V5"],
   search:["M21 21l-4.3-4.3"],
   searchC:[[11,11,7]],
@@ -930,7 +953,7 @@ function icon(name, size, color){
     kids.push(h("path",{d:d}));
   });
   (ICONS[name+"C"] || []).forEach(function(c){
-    kids.push(h("circle",{cx:c[0],cy:c[1],r:c[2],fill:name==="tag"?"currentColor":"none"}));
+    kids.push(h("circle",{cx:c[0],cy:c[1],r:c[2],fill:(name==="tag"||name==="instagram")?"currentColor":"none"}));
   });
   (ICONS[name+"R"] || []).forEach(function(r){
     kids.push(h("rect",{x:r[0],y:r[1],width:r[2],height:r[3],rx:r[4]}));
@@ -2684,6 +2707,23 @@ function viewIosInstall(){
 
 /* ---------- render ---------- */
 var MAIN_PAGES = ["listing", "profile", "mission"];
+
+/* Social links, shown at the foot of every page. URLs are placeholders
+   until the real account links are added. Icons rotate gently and stop
+   for anyone with reduced-motion preferences. */
+var SOCIALS = [
+  { id:"instagram", url:"https://instagram.com/", label:"Instagram" },
+  { id:"tiktok",    url:"https://tiktok.com/",    label:"TikTok" },
+  { id:"facebook",  url:"https://facebook.com/",  label:"Facebook" }
+];
+function viewSocials(){
+  return h("div",{class:"socialbar"}, SOCIALS.map(function(s){
+    return h("a",{class:"socialbtn", href:s.url, target:"_blank",
+      rel:"noopener noreferrer", "aria-label":s.label},
+      [ h("span",{class:"socialspin"},[ icon(s.id, 19) ]) ]);
+  }));
+}
+
 function render(){
   var app = document.getElementById("app");
   app.innerHTML = "";
@@ -2708,6 +2748,12 @@ function render(){
   }
 
   kids.forEach(function(k){ if(k) app.appendChild(k); });
+
+  /* Social links at the foot of every in-app page */
+  if (S.user && S.stage === "app" &&
+      ["listing","profile","mission","detail","edit"].indexOf(S.screen) > -1){
+    app.appendChild(viewSocials());
+  }
 
   /* Slide the new page in from the swipe direction */
   if (S.swipeFrom && app.children.length){
