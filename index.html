@@ -231,7 +231,8 @@
   .listhead h1{margin:0;font-family:Georgia,serif;font-size:26px;font-weight:600;
                color:#fff;letter-spacing:.01em}
   .listhead p{margin:5px 0 0;font-size:13px;color:rgba(207,243,239,.8);line-height:1.5}
-  .listtools{padding:0 16px 12px;display:flex;align-items:center;gap:10px}
+  .addrow{padding:0 16px 10px;display:flex;justify-content:center}
+  .listtools{padding:0 16px 12px;display:flex;align-items:center;justify-content:center;gap:10px}
   .exptotal{margin:0 16px 12px;padding:16px 18px;border-radius:16px;
     background:var(--card);border:var(--lumtrim);box-shadow:var(--cardglow);
     backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between}
@@ -1313,7 +1314,7 @@ var S = {
   search:"",
   catFilter:"all",
   searchOpen:false,
-  expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null,
+  expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null, deleteAccount:null,
   lang:"en",
   installPrompt:false,
   iosInstall:false,
@@ -1936,26 +1937,26 @@ function viewListing(){
     ]),
 
     /* add button hugs its wording; search + sort alongside */
-    h("div",{class:"listtools"},[
+    h("div",{class:"addrow"},[
       canAdd()
         ? h("button",{class:"addbtn",onclick:tryAdd},[icon("plus",17),T("addItem")])
         : h("button",{class:"addbtn",onclick:function(){
             if (membershipLapsed()){ S.screen="profile"; render(); }
             else { S.paywall=true; render(); }
-          }},[icon("lock",15), membershipLapsed()?T("choosePlanAdd"):T("subscribeMore")]),
-
-      hasAny ? h("button",{class:"toolicon"+(S.searchOpen?" on":""),"aria-label":"Search",
+          }},[icon("lock",15), membershipLapsed()?T("choosePlanAdd"):T("subscribeMore")])
+    ]),
+    (hasAny) ? h("div",{class:"listtools"},[
+      h("button",{class:"toolicon"+(S.searchOpen?" on":""),"aria-label":"Search",
         onclick:function(){ S.searchOpen=!S.searchOpen; if(!S.searchOpen){S.search="";} render(); }},
-        [icon("search",16)]) : null,
-
-      (hasAny && S.items.length > 1)
+        [icon("search",16)]),
+      (S.items.length > 1)
         ? h("button",{class:"sortbtn",onclick:function(){ S.sortPicker=true; render(); }},[
             icon("sort",15),
             h("span",{style:"flex:1;text-align:left"},[sortLabel()]),
             icon("chevron",14)
           ])
         : null
-    ]),
+    ]) : null,
 
     /* category filter chips only, revealed by the search button */
     (hasAny && S.searchOpen) ? h("div",{class:"refinebar"},[ chipRow ]) : null,
@@ -2516,12 +2517,14 @@ function viewExpenses(){
       h("span",{class:"exptotal-val serif"},[ fmtMoney(total) || "£0.00" ])
     ]),
 
-    h("div",{class:"listtools"},[
-      h("button",{class:"addbtn",onclick:addExpense},[icon("plus",17),"Add expense"]),
-      hasAny ? h("button",{class:"toolicon"+(S.expSearchOpen?" on":""),"aria-label":"Filter",
-        onclick:function(){ S.expSearchOpen=!S.expSearchOpen; if(!S.expSearchOpen){S.expCatFilter="all";} render(); }},
-        [icon("search",16)]) : null
+    h("div",{class:"addrow"},[
+      h("button",{class:"addbtn",onclick:addExpense},[icon("plus",17),"Add expense"])
     ]),
+    hasAny ? h("div",{class:"listtools"},[
+      h("button",{class:"toolicon"+(S.expSearchOpen?" on":""),"aria-label":"Filter",
+        onclick:function(){ S.expSearchOpen=!S.expSearchOpen; if(!S.expSearchOpen){S.expCatFilter="all";} render(); }},
+        [icon("search",16)])
+    ]) : null,
 
     (hasAny && S.expSearchOpen) ? h("div",{class:"refinebar"},[ chipRow ]) : null,
 
@@ -2837,9 +2840,83 @@ function viewProfile(){
            ])])
       ]),
       h("p",{style:"font-size:12px;color:rgba(207,243,239,.7);margin:12px 6px 0;line-height:1.55"},
-        ["Cancelling stops future payments. You keep access until the end of the period you've paid for, and your items are never deleted."])
+        ["Cancelling stops future payments. You keep access until the end of the period you've paid for, and your items are never deleted."]),
+
+      h("h3",{class:"seclbl",style:"margin-top:22px;color:#F0906A;border-color:rgba(217,102,61,.3)"},["Danger zone"]),
+      h("button",{class:"danger",style:"width:100%",
+        onclick:function(){ S.deleteAccount = { open:true, typed:"", busy:false, err:"" }; render(); }},
+        [icon("trash",15),"Delete account"]),
+      h("p",{style:"font-size:12px;color:rgba(207,243,239,.7);margin:12px 6px 0;line-height:1.55"},
+        ["Deleting removes your account, all contracts and expenses, any files, and cancels your subscription. This can't be undone."])
     ])
   ];
+}
+
+/* Type-DELETE confirmation for permanent account deletion. */
+function viewDeleteAccount(){
+  var st = S.deleteAccount;
+  if (!st || !st.open) return null;
+
+  var inp = h("input",{class:"inp",type:"text",placeholder:"Type DELETE",value:st.typed,
+    autocapitalize:"characters"});
+  inp.addEventListener("input",function(e){ st.typed = e.target.value; render(); });
+
+  var canGo = (st.typed || "").trim().toUpperCase() === "DELETE";
+
+  return h("div",{class:"modalscrim",onclick:function(e){
+    if (e.target && e.target.className==="modalscrim" && !st.busy){ S.deleteAccount=null; render(); }
+  }},[
+    h("div",{class:"modal"},[
+      h("div",{style:"display:flex;justify-content:center"},[
+        h("span",{style:"display:inline-flex;padding:14px;border-radius:16px;background:rgba(217,102,61,.16);color:#F0906A"},[icon("trash",24)])
+      ]),
+      h("h2",{class:"serif",style:"margin:16px 0 0;font-size:20px;color:var(--ink);text-align:center"},["Delete your account"]),
+      h("p",{style:"margin:10px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55;text-align:center"},
+        ["This permanently removes everything — your contracts, expenses, files and profile — and cancels your subscription. It can't be undone."]),
+      h("p",{style:"margin:16px 0 6px;font-size:12.5px;color:var(--ink);text-align:center;font-weight:600"},
+        ["Type DELETE to confirm"]),
+      inp,
+      st.err ? h("p",{style:"font-size:12.5px;color:#F0906A;margin:9px 0 0;text-align:center"},[st.err]) : null,
+      h("button",{class:"btn",style:"margin-top:16px;padding:13px;font-weight:700;"
+          + (canGo ? "background:#C2542F;color:#fff" : "background:rgba(255,255,255,.08);color:rgba(232,246,245,.35)"),
+        disabled: !canGo || st.busy,
+        onclick:function(){
+          if (!canGo || st.busy) return;
+          st.busy = true; st.err = ""; render();
+          deleteAccountNow(function(err){
+            if (err){ st.busy=false; st.err="Couldn't delete: "+err+". Please try again."; render(); return; }
+            /* success — sign out locally and return to welcome */
+            S.deleteAccount = null;
+            if (sb){ try { sb.auth.signOut(); } catch(e){} }
+            S.user=null; S.stage="welcome"; S.screen="listing";
+            S.items=[]; S.expenses=[]; S.membership=null; S.authEmail="";
+            S.codeSent=false; S.authCode="";
+            render(); ping("Your account has been deleted");
+          });
+        }},
+        [ st.busy ? "Deleting…" : "Permanently delete" ]),
+      h("button",{style:"width:100%;margin-top:9px;padding:11px;font-size:14px;font-weight:600;color:var(--muted)",
+        onclick:function(){ if(!st.busy){ S.deleteAccount=null; render(); } }},["Cancel"])
+    ])
+  ]);
+}
+
+/* Calls the server-side deletion function with the user's access token. */
+function deleteAccountNow(cb){
+  if (!sb){ cb("offline"); return; }
+  sb.auth.getSession().then(function(res){
+    var token = res && res.data && res.data.session && res.data.session.access_token;
+    if (!token){ cb("not signed in"); return; }
+    return fetch("/.netlify/functions/delete-account", {
+      method:"POST",
+      headers:{ "Authorization":"Bearer "+token, "Content-Type":"application/json" },
+      body:"{}"
+    }).then(function(r){ return r.json().then(function(j){ return {ok:r.ok, j:j}; }); })
+      .then(function(out){
+        if (out.ok && out.j && out.j.ok) cb(null);
+        else cb((out.j && out.j.error) ? out.j.error : "server error");
+      });
+  }).catch(function(){ cb("network error"); });
 }
 
 function viewMission(){
@@ -3180,15 +3257,8 @@ function render(){
     }
   }
 
-  /* Page dots on the three swipeable pages */
+  /* (page dots removed) reset swipe direction after render */
   if (S.user && S.stage === "app" && MAIN_PAGES.indexOf(S.screen) > -1){
-    var pidx = MAIN_PAGES.indexOf(S.screen);
-    app.appendChild(h("div",{class:"pagedots"},
-      MAIN_PAGES.map(function(pg,i){
-        return h("button",{class:"pagedot"+(i===pidx?" on":""),"aria-label":pg,
-          onclick:function(){ S.screen=pg; S.swipeFrom=null; render(); }});
-      })
-    ));
     S.swipeFrom = null;
   }
 
@@ -3200,6 +3270,7 @@ function render(){
   if (S.iosInstall) app.appendChild(viewIosInstall());
   if (S.confirmDelete) app.appendChild(viewConfirmDelete());
   if (S.confirmDeleteExpense) app.appendChild(viewConfirmDeleteExpense());
+  if (S.deleteAccount && S.deleteAccount.open) app.appendChild(viewDeleteAccount());
 
   if (S.toast){
     app.appendChild(h("div",{class:"toast fade"},[icon("check",15,"#5EE7D0"), S.toast]));
