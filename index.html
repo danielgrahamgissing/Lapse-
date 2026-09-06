@@ -232,6 +232,13 @@
                color:#fff;letter-spacing:.01em}
   .listhead p{margin:5px 0 0;font-size:13px;color:rgba(207,243,239,.8);line-height:1.5}
   .listtools{padding:0 16px 12px;display:flex;align-items:center;gap:10px}
+  .exptotal{margin:0 16px 12px;padding:16px 18px;border-radius:16px;
+    background:var(--card);border:var(--lumtrim);box-shadow:var(--cardglow);
+    backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between}
+  .exptotal-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.16em;
+    font-weight:700;color:var(--lumin)}
+  .exptotal-val{font-size:26px;font-weight:600;color:var(--ink);
+    text-shadow:0 0 14px rgba(45,191,196,.3)}
   .addbtn{display:inline-flex;align-items:center;gap:7px;padding:11px 18px;border-radius:999px;
           font-weight:700;font-size:14px;background:var(--aqua);color:#04262D;
           border:1px solid var(--lumin-soft);
@@ -695,6 +702,75 @@ function deleteContract(id, cb){
     })
     .then(function(res){ cb(!res || !res.error); })
     .catch(function(){ cb(false); });
+}
+
+/* ---------- Expenses ---------- */
+function rowToExpense(r){
+  return {
+    id: r.id,
+    description: r.description,
+    category: r.category || "personal",
+    amount: (r.amount === null || r.amount === undefined) ? 0 : r.amount,
+    spentOn: r.spent_on || "",
+    notes: r.notes || "",
+    receipts: Array.isArray(r.receipts) ? r.receipts : []
+  };
+}
+function expenseToRow(e, userId){
+  return {
+    user_id: userId,
+    description: e.description,
+    category: e.category || "personal",
+    amount: (e.amount === null || e.amount === undefined || isNaN(e.amount)) ? 0 : e.amount,
+    spent_on: e.spentOn || null,
+    notes: e.notes || "",
+    receipts: Array.isArray(e.receipts) ? e.receipts : []
+  };
+}
+/* Upload a receipt photo (compressed) for an expense. */
+function uploadReceipt(expenseId, file, cb){
+  if (!sb || !S.user){ cb("offline"); return; }
+  if (file.size > MAX_UPLOAD_BYTES){ cb("too-big"); return; }
+  compressImage(file, function(blob){
+    var path = S.user.id + "/expenses/" + expenseId + "/" + Date.now() + ".jpg";
+    sb.storage.from("contract-files").upload(path, blob, {
+      contentType:"image/jpeg", upsert:false
+    }).then(function(res){
+      if (res.error){ cb("upload-failed"); return; }
+      cb(null, { path: path, name: file.name || "receipt.jpg" });
+    }).catch(function(){ cb("upload-failed"); });
+  });
+}
+function loadExpenses(cb){
+  if (!sb || !S.user){ cb([]); return; }
+  sb.from("expenses").select("*").order("spent_on",{ascending:false})
+    .then(function(res){ cb(res.error ? [] : (res.data||[]).map(rowToExpense)); })
+    .catch(function(){ cb([]); });
+}
+function insertExpense(exp, cb){
+  if (!sb || !S.user){ cb(null); return; }
+  sb.from("expenses").insert(expenseToRow(exp, S.user.id)).select().single()
+    .then(function(res){ cb(res.error ? null : rowToExpense(res.data)); })
+    .catch(function(){ cb(null); });
+}
+function updateExpense(id, exp, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("expenses").update(expenseToRow(exp, S.user.id)).eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+function deleteExpense(id, cb, filePaths){
+  if (!sb || !S.user){ cb(false); return; }
+  /* remove any receipt photos this expense holds, then the row */
+  var paths = filePaths || [];
+  var storageStep = paths.length
+    ? sb.storage.from("contract-files").remove(paths).catch(function(){ return null; })
+    : Promise.resolve(null);
+  storageStep.then(function(){
+    return sb.from("expenses").delete().eq("id", id);
+  })
+  .then(function(res){ cb(!res || !res.error); })
+  .catch(function(){ cb(false); });
 }
 
 /* Load the user's profile (subscription status) */
@@ -1237,6 +1313,7 @@ var S = {
   search:"",
   catFilter:"all",
   searchOpen:false,
+  expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null,
   lang:"en",
   installPrompt:false,
   iosInstall:false,
@@ -1252,6 +1329,9 @@ var S = {
     {id:5,name:"Passport",category:"personal",cost:8850,provider:"HMPO",ref:"",notes:"",files:[],occurrence:"oneoff",payDay:null,endDate:addDays(340),remind:[30,7,1]}
   ],
   items:[],
+  expenses:[],
+  expenseDraft:null,
+  activeExpense:null,
   draft:null
 };
 
@@ -1491,6 +1571,7 @@ function pageTitle(title, sub){
 function navItems(){
   return [
     {id:"listing", label:T("myRenewals"), sub:T("listSub"),                 ic:"list"},
+    {id:"expenses", label:"Expenses",     sub:"What you've spent",          ic:"tag"},
     {id:"profile", label:T("profile"),    sub:T("accountDetails"),          ic:"user"},
     {id:"mission", label:T("mission"),    sub:T("whatWeDo"),                ic:"target"}
   ];
@@ -2372,6 +2453,298 @@ function viewDetail(){
   ];
 }
 
+/* ---------- Expenses page ---------- */
+function expensesSorted(){
+  var list = S.expenses.slice();
+  if (S.expCatFilter && S.expCatFilter !== "all"){
+    list = list.filter(function(e){ return e.category === S.expCatFilter; });
+  }
+  list.sort(function(a,b){
+    var da = a.spentOn || "", db = b.spentOn || "";
+    if (da === db) return 0;
+    return da < db ? 1 : -1;   // most recent first
+  });
+  return list;
+}
+
+function viewExpenses(){
+  var list = expensesSorted();
+  var hasAny = S.expenses.length > 0;
+  var filtering = S.expCatFilter && S.expCatFilter !== "all";
+
+  var total = S.expenses.reduce(function(sum,e){ return sum + (e.amount||0); }, 0);
+
+  var body = [];
+  if (list.length === 0 && !hasAny){
+    body.push(h("div",{class:"empty"},[
+      h("span",{style:"display:inline-flex;padding:16px;border-radius:16px;background:rgba(45,191,196,.12);color:#1B7F87"},[icon("tag",26)]),
+      h("h2",{},["No expenses yet"]),
+      h("p",{},["Log what you spend — description, date and amount — to see where your money goes."]),
+      h("button",{style:"margin-top:16px;font-size:14px;font-weight:600;color:#1B7F87;text-decoration:underline;text-underline-offset:4px",
+        onclick:addExpense},["Add your first expense"])
+    ]));
+  } else if (list.length === 0 && filtering){
+    body.push(h("div",{class:"empty"},[
+      h("span",{style:"display:inline-flex;padding:16px;border-radius:16px;background:rgba(45,191,196,.12);color:#1B7F87"},[icon("search",24)]),
+      h("h2",{},["Nothing here"]),
+      h("p",{},["No expenses in that category yet."]),
+      h("button",{style:"margin-top:16px;font-size:14px;font-weight:600;color:#1B7F87;text-decoration:underline;text-underline-offset:4px",
+        onclick:function(){ S.expCatFilter="all"; render(); }},["Clear filter"])
+    ]));
+  } else {
+    list.forEach(function(e){ body.push(expenseRow(e)); });
+  }
+
+  var catChips = [["all","All"]].concat(Object.keys(CATS).map(function(k){ return [k, CATS[k].label]; }));
+  var chipRow = h("div",{class:"catfilter"}, catChips.map(function(c){
+    var on = (S.expCatFilter||"all") === c[0];
+    return h("button",{class:"catchip"+(on?" on":""),onclick:function(){
+      S.expCatFilter = c[0]; render();
+    }},[ c[0]!=="all" ? icon(CAT(c[0]).ic,13) : null, c[1] ]);
+  }));
+
+  return [
+    appBar(),
+    h("div",{class:"listhead"},[
+      h("h1",{},["Expenses"]),
+      h("p",{},[ hasAny ? S.expenses.length+(S.expenses.length===1?" expense":" expenses") : "Track what you spend" ])
+    ]),
+
+    /* running total */
+    h("div",{class:"exptotal"},[
+      h("span",{class:"exptotal-lbl"},["Total spent"]),
+      h("span",{class:"exptotal-val serif"},[ fmtMoney(total) || "£0.00" ])
+    ]),
+
+    h("div",{class:"listtools"},[
+      h("button",{class:"addbtn",onclick:addExpense},[icon("plus",17),"Add expense"]),
+      hasAny ? h("button",{class:"toolicon"+(S.expSearchOpen?" on":""),"aria-label":"Filter",
+        onclick:function(){ S.expSearchOpen=!S.expSearchOpen; if(!S.expSearchOpen){S.expCatFilter="all";} render(); }},
+        [icon("search",16)]) : null
+    ]),
+
+    (hasAny && S.expSearchOpen) ? h("div",{class:"refinebar"},[ chipRow ]) : null,
+
+    h("div",{class:"body",style:"padding:4px 16px 8px"}, body)
+  ];
+}
+
+function expenseRow(e){
+  var sub = fmtDate(e.spentOn) + " · " + CAT(e.category).label;
+  return h("button",{class:"lrow",onclick:function(){ openExpense(e); }},[
+    h("span",{class:"cico",style:"background:rgba(45,191,196,.12);color:#1B7F87"},[icon(CAT(e.category).ic,16)]),
+    h("span",{class:"cmid"},[
+      h("span",{class:"cname"},[e.description]),
+      h("span",{class:"desc lumin"},[sub])
+    ]),
+    h("span",{class:"cright"},[
+      h("span",{class:"crightcol"},[
+        h("b",{class:"serif costtag",style:"color:var(--ink)"},[ fmtMoney(e.amount) || "£0.00" ]),
+        (e.receipts && e.receipts.length)
+          ? h("span",{style:"display:flex;align-items:center;gap:3px;justify-content:flex-end;font-size:10.5px;color:var(--faint);margin-top:2px"},
+              [icon("camera",11), String(e.receipts.length)]) : null
+      ]),
+      icon("chevron",15,"var(--faint)")
+    ])
+  ]);
+}
+
+function openExpense(e){ S.activeExpense = e; S.screen = "expenseDetail"; render(); }
+
+function addExpense(){
+  S.expenseDraft = { description:"", category:"personal", amount:null,
+    spentOn: TODAY.toISOString().slice(0,10), notes:"", receipts:[] };
+  S.activeExpense = null; S.screen = "expenseEdit"; render();
+}
+
+/* ---------- Expense add / edit form ---------- */
+function viewExpenseEdit(){
+  var isEdit = !!S.activeExpense;
+  var f = S.expenseDraft;
+
+  function field(label, kids){
+    return h("div",{class:"fld"},[ h("label",{},[label]) ].concat(kids));
+  }
+
+  var descInp = h("input",{class:"inp",type:"text",placeholder:"e.g. Weekly food shop",value:f.description});
+  descInp.addEventListener("input",function(e){ f.description=e.target.value; });
+
+  var amountInp = h("input",{class:"inp",type:"text",inputmode:"decimal",placeholder:"0.00",
+    value: (f.amount!==null && f.amount!==undefined) ? (f.amount/100).toFixed(2) : ""});
+  amountInp.addEventListener("input",function(e){
+    var v = String(e.target.value||"").replace(/[^0-9.]/g,"");
+    var num = parseFloat(v);
+    f.amount = isNaN(num) ? null : Math.round(num*100);
+  });
+
+  var dateInp = h("input",{class:"inp",type:"date",value:f.spentOn||""});
+  dateInp.addEventListener("input",function(e){ f.spentOn=e.target.value; });
+
+  var notesInp = h("textarea",{class:"inp",rows:"3",placeholder:"Anything worth noting"});
+  notesInp.value = f.notes || "";
+  notesInp.addEventListener("input",function(e){ f.notes=e.target.value; });
+
+  var catBtns = Object.keys(CATS).map(function(k){
+    var c = CATS[k];
+    var b = h("button",{class:"catbtn"+(f.category===k?" on":"")},[icon(c.ic,16),c.label]);
+    b.addEventListener("click",function(){ f.category=k; render(); });
+    return b;
+  });
+
+  /* receipt photo */
+  function pickReceipt(){
+    if (!isEdit || !S.activeExpense){
+      ping("Save the expense first, then add a receipt");
+      return;
+    }
+    var picker = document.createElement("input");
+    picker.type = "file"; picker.accept = "image/*";
+    picker.setAttribute("capture","environment");
+    picker.addEventListener("change",function(){
+      var file = picker.files && picker.files[0];
+      if (!file) return;
+      S.uploading = true; render();
+      uploadReceipt(S.activeExpense.id, file, function(err,row){
+        S.uploading = false;
+        if (err==="too-big"){ ping("That photo is too large (max 10MB)"); render(); return; }
+        if (err){ ping("Couldn't upload — check your connection"); render(); return; }
+        f.receipts = (f.receipts||[]).concat([row]);
+        updateExpense(S.activeExpense.id, f, function(){});
+        render(); ping("Receipt added");
+      });
+    });
+    picker.click();
+  }
+  var receiptRows = (f.receipts||[]).map(function(r){
+    return h("div",{class:"filerow"},[
+      h("span",{style:"display:flex;color:#1B7F87"},[icon("camera",15)]),
+      h("button",{class:"nm",style:"text-align:left;color:var(--ink)",
+        onclick:function(){ openReceipt(r); }},[r.name]),
+      h("button",{style:"padding:5px;color:var(--faint)","aria-label":"Remove",
+        onclick:function(){
+          f.receipts = f.receipts.filter(function(x){ return x.path!==r.path; });
+          render();
+          if (sb) sb.storage.from("contract-files").remove([r.path]).catch(function(){});
+          updateExpense(S.activeExpense.id, f, function(){});
+        }},[icon("x",15)])
+    ]);
+  });
+
+  var saveBtn = h("button",{class:"btn btn-aqua"},[ isEdit ? "Save changes" : "Add expense" ]);
+  saveBtn.addEventListener("click",function(){
+    if (!(f.description||"").trim()){ ping("Add a description"); return; }
+    if (f.amount === null || f.amount === undefined){ ping("Add an amount"); return; }
+    if (isEdit){
+      var id = S.activeExpense.id;
+      S.expenses = S.expenses.map(function(x){ return x.id===id ? Object.assign({},f,{id:id}) : x; });
+      S.activeExpense=null; S.screen="expenses"; render(); ping("Changes saved");
+      updateExpense(id, f, function(ok){ if(!ok) ping("Couldn't save — check connection"); });
+    } else {
+      var temp = Object.assign({},f,{id:"tmp-"+Date.now()});
+      S.expenses = S.expenses.concat([temp]);
+      S.activeExpense=null; S.screen="expenses"; render(); ping("Expense added");
+      insertExpense(f, function(saved){
+        if (saved){
+          S.expenses = S.expenses.map(function(x){ return x.id===temp.id ? saved : x; });
+          render();
+        } else {
+          S.expenses = S.expenses.filter(function(x){ return x.id!==temp.id; });
+          render(); ping("Couldn't save — try again");
+        }
+      });
+    }
+  });
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.activeExpense=null; S.screen="expenses"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},[ isEdit ? "Edit expense" : "New expense" ])
+    ]),
+    h("div",{class:"body"},[
+      field("What was it", [descInp]),
+      field("Amount", [amountInp]),
+      field("Date", [dateInp]),
+      field("Category", [h("div",{class:"cat3"},catBtns)]),
+      field("Notes", [notesInp]),
+      h("h3",{class:"seclbl",style:"margin-top:20px"},["Receipt"]),
+      h("div",{style:"display:flex;gap:9px;margin-bottom:"+(receiptRows.length?"10px":"0")},[
+        h("button",{class:"attachbtn",disabled:S.uploading,onclick:pickReceipt},
+          [icon("camera",19), S.uploading ? "Uploading…" : "Add receipt photo"])
+      ].concat(receiptRows).concat([
+        h("p",{style:"font-size:12px;color:var(--muted);margin:9px 0 0;line-height:1.5"},
+          [ isEdit ? "Snap the receipt so you have a record. Photos are compressed."
+                   : "Save this expense first, then you can add a receipt." ])
+      ])),
+      isEdit ? h("button",{class:"danger",style:"margin-top:22px",onclick:function(){
+        S.confirmDeleteExpense = S.activeExpense; render();
+      }},[icon("trash",15),"Delete expense"]) : null
+    ]),
+    h("div",{class:"foot"},[saveBtn])
+  ];
+}
+
+/* ---------- Expense detail ---------- */
+function viewExpenseDetail(){
+  var e = S.activeExpense;
+  if (!e) { S.screen="expenses"; return viewExpenses(); }
+
+  function metaRow(k,v){ return h("div",{class:"kv"},[h("dt",{},[k]),h("dd",{},[v])]); }
+
+  var receiptRows = (e.receipts||[]).map(function(r){
+    return h("button",{class:"filerow",style:"width:100%;text-align:left",
+      onclick:function(){ openReceipt(r); }},[
+      h("span",{style:"display:flex;color:#1B7F87"},[icon("camera",15)]),
+      h("span",{class:"nm"},[r.name]),
+      h("span",{style:"font-size:11.5px;color:#1B7F87;font-weight:600"},["View"])
+    ]);
+  });
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.activeExpense=null; S.screen="expenses"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},["Expense"])
+    ]),
+    h("div",{class:"body"},[
+      h("div",{class:"dhead"},[
+        h("span",{class:"ic",style:"background:rgba(45,191,196,.12);color:#1B7F87"},[icon(CAT(e.category).ic,20)]),
+        h("div",{style:"flex:1"},[
+          h("h2",{},[e.description]),
+          h("p",{},[CAT(e.category).label])
+        ])
+      ]),
+      h("div",{class:"bigbox fade",style:"background:rgba(45,191,196,.1);border:1px solid rgba(45,191,196,.3);text-align:center;margin-top:16px"},[
+        h("span",{class:"n serif",style:"color:var(--ink)"},[ fmtMoney(e.amount) || "£0.00" ]),
+        h("p",{style:"margin:6px 0 0;font-size:13px;color:var(--muted)"},[ fmtDate(e.spentOn) ])
+      ]),
+      e.notes ? h("div",{class:"meta",style:"margin-top:18px"},[metaRow("Notes", e.notes)]) : null,
+      h("h3",{class:"seclbl",style:"margin-top:20px"},["Receipt"]),
+      receiptRows.length ? h("div",{},receiptRows)
+        : h("p",{style:"font-size:12.5px;color:var(--muted);margin:0;line-height:1.5"},
+            ["No receipt attached. Tap Edit to add one."]),
+      h("button",{class:"btn",style:"margin-top:22px;background:transparent;border:1px solid var(--aqua);color:var(--aqua);font-weight:700",
+        onclick:function(){
+          S.expenseDraft = Object.assign({}, e, {receipts:(e.receipts||[]).slice()});
+          S.screen="expenseEdit"; render();
+        }},[icon("edit",16),"Edit"])
+    ])
+  ];
+}
+
+function openReceipt(r){
+  if (!sb){ ping("Can't reach the server"); return; }
+  sb.storage.from("contract-files").createSignedUrl(r.path, 60)
+    .then(function(res){
+      if (res.error || !res.data || !res.data.signedUrl){ ping("Couldn't open that receipt"); return; }
+      window.open(res.data.signedUrl, "_blank");
+    }).catch(function(){ ping("Couldn't open that receipt"); });
+}
+
 function viewProfile(){
   var m = S.membership;
   var lapsed = membershipLapsed();
@@ -2639,6 +3012,43 @@ function viewInstallPrompt(){
 /* iOS manual instructions sheet */
 /* Confirm before deleting a contract — it takes the attachments and
    reminder history with it, and there's no undo. */
+function viewConfirmDeleteExpense(){
+  var e = S.confirmDeleteExpense;
+  if (!e) return null;
+  var rc = (e.receipts||[]).length;
+  return h("div",{class:"modalscrim",onclick:function(ev){
+    if (ev.target && ev.target.className==="modalscrim"){ S.confirmDeleteExpense=null; render(); }
+  }},[
+    h("div",{class:"modal"},[
+      h("div",{style:"display:flex;justify-content:center"},[
+        h("span",{style:"display:inline-flex;padding:14px;border-radius:16px;background:rgba(217,102,61,.16);color:#F0906A"},[icon("trash",24)])
+      ]),
+      h("h2",{class:"serif",style:"margin:16px 0 0;font-size:20px;color:var(--ink);text-align:center"},["Delete this expense?"]),
+      h("p",{style:"margin:10px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55;text-align:center"},
+        [ h("b",{style:"color:var(--ink)"},[e.description]),
+          " will be removed permanently",
+          rc ? ", along with its receipt" + (rc>1?"s":"") : "", "." ]),
+      h("button",{class:"btn",style:"margin-top:18px;padding:13px;background:#C2542F;color:#fff;font-weight:700",
+        disabled:S.deleting,
+        onclick:function(){
+          if (S.deleting) return;
+          S.deleting=true; render();
+          var id=e.id, paths=(e.receipts||[]).map(function(r){return r.path;});
+          deleteExpense(id, function(ok){
+            S.deleting=false; S.confirmDeleteExpense=null;
+            if (ok){
+              S.expenses = S.expenses.filter(function(x){ return x.id!==id; });
+              S.activeExpense=null; S.screen="expenses";
+              render(); ping("Expense deleted");
+            } else { render(); ping("Couldn't delete — check connection"); }
+          }, paths);
+        }},[ S.deleting ? "Deleting…" : "Yes, delete it" ]),
+      h("button",{style:"width:100%;margin-top:9px;padding:11px;font-size:14px;font-weight:600;color:var(--muted)",
+        onclick:function(){ S.confirmDeleteExpense=null; render(); }},["Keep it"])
+    ])
+  ]);
+}
+
 function viewConfirmDelete(){
   var item = S.confirmDelete;
   if (!item) return null;
@@ -2706,7 +3116,7 @@ function viewIosInstall(){
 }
 
 /* ---------- render ---------- */
-var MAIN_PAGES = ["listing", "profile", "mission"];
+var MAIN_PAGES = ["listing", "expenses", "profile", "mission"];
 
 /* Social links, shown at the foot of every page. URLs are placeholders
    until the real account links are added. Icons rotate gently and stop
@@ -2739,6 +3149,12 @@ function render(){
     kids = viewEdit();
   } else if (S.screen === "detail"){
     kids = viewDetail();
+  } else if (S.screen === "expenses"){
+    kids = viewExpenses();
+  } else if (S.screen === "expenseEdit"){
+    kids = viewExpenseEdit();
+  } else if (S.screen === "expenseDetail"){
+    kids = viewExpenseDetail();
   } else if (S.screen === "profile"){
     kids = viewProfile();
   } else if (S.screen === "mission"){
@@ -2751,7 +3167,7 @@ function render(){
 
   /* Social links at the foot of every in-app page */
   if (S.user && S.stage === "app" &&
-      ["listing","profile","mission","detail","edit"].indexOf(S.screen) > -1){
+      ["listing","expenses","profile","mission","detail","edit","expenseDetail","expenseEdit"].indexOf(S.screen) > -1){
     app.appendChild(viewSocials());
   }
 
@@ -2783,6 +3199,7 @@ function render(){
   if (S.installPrompt && S.user && S.stage === "app") app.appendChild(viewInstallPrompt());
   if (S.iosInstall) app.appendChild(viewIosInstall());
   if (S.confirmDelete) app.appendChild(viewConfirmDelete());
+  if (S.confirmDeleteExpense) app.appendChild(viewConfirmDeleteExpense());
 
   if (S.toast){
     app.appendChild(h("div",{class:"toast fade"},[icon("check",15,"#5EE7D0"), S.toast]));
@@ -2856,6 +3273,7 @@ function enterApp(user){
       S.screen = "listing";
       S.installPrompt = false;
       render();
+      loadExpenses(function(exps){ S.expenses = exps; render(); });
 
       /* Just returned from a successful Stripe checkout? The webhook may
          take a second or two to flip the profile, so poll a few times. */
