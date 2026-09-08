@@ -1326,7 +1326,7 @@ var S = {
   search:"",
   catFilter:"all",
   searchOpen:false,
-  expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null, deleteAccount:null,
+  expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null, deleteAccount:null, billingBusy:false,
   lang:"en",
   installPrompt:false,
   iosInstall:false,
@@ -2791,15 +2791,14 @@ function viewProfile(){
               [T("keepAccess")+" "+fmtDate(m.expires)+"."])
           : h("p",{style:"margin:14px 0 0;font-size:13px;color:rgba(255,255,255,.6);line-height:1.5"},
               [T("renewsOn")+" "+fmtDate(m.renews)+"."]),
-        m.cancelled
-          ? h("p",{style:"margin:12px 0 0;font-size:12px;color:rgba(255,255,255,.45);line-height:1.5"},
-              ["When it ends you can still sign in. To carry on you'll choose a plan again."])
-          : h("button",{style:"width:100%;margin-top:14px;font-size:13px;color:rgba(255,255,255,.5);padding:6px",
-              onclick:function(){
-                m.cancelled = true;
-                m.expires = m.renews;
-                render(); ping("Cancelled — access until "+fmtDate(m.expires));
-              }},[T("cancelMembership")])
+        h("button",{style:"width:100%;margin-top:14px;padding:12px;border-radius:12px;"
+            + "background:rgba(0,245,212,.14);border:1px solid rgba(0,245,212,.4);"
+            + "color:var(--aqua);font-weight:700;font-size:13.5px;display:flex;"
+            + "align-items:center;justify-content:center;gap:8px",
+          disabled:S.billingBusy, onclick:openBillingPortal},
+          [ icon("card",16), S.billingBusy ? "Opening…" : "Manage billing" ]),
+        h("p",{style:"margin:9px 0 0;font-size:11.5px;color:rgba(255,255,255,.45);line-height:1.5;text-align:center"},
+          ["Update your card, view invoices or cancel — securely via Stripe."])
       ])
     ]);
   } else if (lapsed){
@@ -2916,6 +2915,31 @@ function viewDeleteAccount(){
 }
 
 /* Calls the server-side deletion function with the user's access token. */
+/* Opens Stripe's billing portal so the user can update their card,
+   view invoices, or cancel — all handled securely by Stripe. */
+function openBillingPortal(){
+  if (S.billingBusy) return;
+  if (!sb){ ping("Can't reach the server"); return; }
+  S.billingBusy = true; render();
+  sb.auth.getSession().then(function(res){
+    var token = res && res.data && res.data.session && res.data.session.access_token;
+    if (!token){ S.billingBusy=false; render(); ping("Please sign in again"); return; }
+    return fetch("/.netlify/functions/billing-portal", {
+      method:"POST",
+      headers:{ "Authorization":"Bearer "+token, "Content-Type":"application/json" },
+      body: JSON.stringify({ origin: window.location.origin })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(out){
+      if (out && out.url){ window.location.href = out.url; }
+      else {
+        S.billingBusy=false; render();
+        ping(out && out.error ? out.error : "Couldn't open billing — try again");
+      }
+    });
+  }).catch(function(){ S.billingBusy=false; render(); ping("Couldn't reach the billing server"); });
+}
+
 function deleteAccountNow(cb){
   if (!sb){ cb("offline"); return; }
   sb.auth.getSession().then(function(res){
@@ -3371,6 +3395,19 @@ function enterApp(user){
       }
       if (/[?&]canceled=1/.test(window.location.search)){
         ping("Checkout canceled — no charge made");
+      }
+      /* Returned from the billing portal — reload profile in case they
+         changed their card, cancelled, or reactivated. */
+      if (/[?&]billing=done/.test(window.location.search)){
+        loadProfile(function(pr){
+          S.membership = (pr && pr.subscribed)
+            ? { plan: pr.plan || "monthly", since: pr.created_at || null,
+                renews: pr.current_period_end || null, cancelled:false, expires:null }
+            : null;
+          S.plan = (pr && pr.subscribed) ? "pro" : "free";
+          S.trial = !(pr && pr.subscribed);
+          render();
+        });
       }
     });
   });
