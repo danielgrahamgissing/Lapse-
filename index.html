@@ -575,6 +575,44 @@
   @keyframes socialSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
   @media (prefers-reduced-motion:reduce){ .socialspin{animation:none} }
 
+  /* ---- tools page ---- */
+  .toolgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .toolcard{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:8px;padding:26px 14px;border-radius:18px;background:var(--card);
+    border:var(--lumtrim);box-shadow:var(--cardglow);backdrop-filter:blur(8px);
+    aspect-ratio:1/1;position:relative;overflow:hidden}
+  .toolcard-ic{display:inline-flex;padding:14px;border-radius:14px;
+    background:rgba(0,245,212,.10);color:var(--aqua);
+    box-shadow:inset 0 0 0 1px rgba(0,245,212,.2), 0 0 18px -8px rgba(0,245,212,.6)}
+  .toolcard-lbl{font-size:15px;font-weight:600;color:var(--ink)}
+  .toolcard-sub{font-size:12px;color:var(--muted)}
+
+  /* ---- calculator ---- */
+  .calcwrap{flex:1;display:flex;flex-direction:column;padding:8px 16px 20px;min-height:0}
+  .calcscreen{background:var(--card);border:var(--lumtrim);border-radius:18px;
+    box-shadow:var(--cardglow);backdrop-filter:blur(8px);
+    padding:22px 20px;margin-bottom:14px;text-align:right;min-height:96px;
+    display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
+  .calcexpr{font-size:14px;color:var(--faint);min-height:18px;font-family:Georgia,serif;
+    letter-spacing:.02em}
+  .calcdisplay{font-size:44px;font-weight:600;color:var(--ink);font-family:Georgia,serif;
+    line-height:1.1;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;
+    text-shadow:0 0 18px rgba(0,245,212,.25)}
+  .calcpad{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;flex:1;min-height:0}
+  .calckey{border-radius:16px;font-size:22px;font-weight:600;color:var(--ink);
+    background:var(--card);border:var(--lumtrim);
+    box-shadow:0 6px 18px -12px rgba(0,0,0,.8);min-height:58px;
+    display:flex;align-items:center;justify-content:center;
+    -webkit-tap-highlight-color:transparent;transition:transform .1s ease, background .15s ease}
+  .calckey:active{transform:scale(.95)}
+  .calckey-fn{color:var(--aqua);background:rgba(0,245,212,.06);font-size:19px}
+  .calckey-op{color:#02100E;background:var(--aqua);font-size:24px;font-weight:700;
+    box-shadow:0 4px 16px -6px rgba(0,245,212,.6)}
+  .calckey-op.on{background:var(--mint);box-shadow:0 0 22px -4px rgba(0,245,212,.9)}
+  .calckey-eq{color:#02100E;background:var(--aqua);font-weight:700;
+    box-shadow:0 4px 16px -6px rgba(0,245,212,.7)}
+  .calckey-zero{grid-column:span 2}
+
   /* ---- page slide-in on swipe/nav between main pages ---- */
   .pageslide-right{animation:slideR .28s cubic-bezier(.2,.8,.3,1) both}
   .pageslide-left{animation:slideL .28s cubic-bezier(.2,.8,.3,1) both}
@@ -998,6 +1036,9 @@ var ICONS = {
   bell:["M10.3 21a1.9 1.9 0 0 0 3.4 0","M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"],
   card:["M2 10h20"],
   cardR:[[2,5,20,14,2]],
+  calc:["M8 6h8","M8 10h.01","M12 10h.01","M16 10h.01","M8 14h.01","M12 14h.01","M16 14h.01","M8 18h.01","M12 18h.01","M16 18h.01"],
+  calcR:[[4,3,16,18,3]],
+  tools:["M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2 2.6-2.6Z"],
   out:["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4","M16 17l5-5-5-5","M21 12H9"],
   x:["M18 6 6 18","M6 6l12 12"],
   lock:["M7 11V7a5 5 0 0 1 10 0v4"],
@@ -1585,6 +1626,7 @@ function navItems(){
   return [
     {id:"listing", label:T("myRenewals"), sub:T("listSub"),                 ic:"list"},
     {id:"expenses", label:"Expenses",     sub:"What you've spent",          ic:"tag"},
+    {id:"tools",   label:"Tools",         sub:"Handy extras",               ic:"tools"},
     {id:"profile", label:T("profile"),    sub:T("accountDetails"),          ic:"user"},
     {id:"mission", label:T("mission"),    sub:T("whatWeDo"),                ic:"target"}
   ];
@@ -2957,6 +2999,131 @@ function deleteAccountNow(cb){
   }).catch(function(){ cb("network error"); });
 }
 
+/* ---------- Tools page ---------- */
+function viewTools(){
+  var tools = [
+    { id:"calc", label:"Calculator", sub:"Quick sums", ic:"calc",
+      onclick:function(){ S.screen="calculator"; render(); } }
+  ];
+  return [
+    appBar(),
+    h("div",{class:"listhead"},[
+      h("h1",{},["Tools"]),
+      h("p",{},["Handy extras"])
+    ]),
+    h("div",{class:"body",style:"padding:8px 16px"},[
+      h("div",{class:"toolgrid"}, tools.map(function(tl){
+        return h("button",{class:"toolcard",onclick:tl.onclick},[
+          h("span",{class:"toolcard-ic"},[icon(tl.ic,26)]),
+          h("span",{class:"toolcard-lbl"},[tl.label]),
+          h("span",{class:"toolcard-sub"},[tl.sub])
+        ]);
+      }))
+    ])
+  ];
+}
+
+/* ---------- Calculator ---------- */
+function calcPress(key){
+  var c = S.calc;
+  function clearAll(){ c.display="0"; c.prev=null; c.op=null; c.fresh=true; }
+  if (!c) { S.calc = c = { display:"0", prev:null, op:null, fresh:true }; }
+
+  if (key === "C"){ clearAll(); return; }
+  if (key === "back"){
+    if (c.fresh){ return; }
+    c.display = c.display.length > 1 ? c.display.slice(0,-1) : "0";
+    if (c.display === "0" || c.display === "-") c.display = "0";
+    return;
+  }
+  if (key === "%"){
+    c.display = String(parseFloat(c.display) / 100); c.fresh = true; return;
+  }
+  if (key === "+/-"){
+    if (c.display !== "0")
+      c.display = c.display.charAt(0) === "-" ? c.display.slice(1) : "-" + c.display;
+    return;
+  }
+  if (key === "."){
+    if (c.fresh){ c.display = "0."; c.fresh = false; return; }
+    if (c.display.indexOf(".") === -1) c.display += ".";
+    return;
+  }
+  if (/[0-9]/.test(key)){
+    if (c.fresh || c.display === "0"){ c.display = key; c.fresh = false; }
+    else if (c.display.replace(/[^0-9]/g,"").length < 12){ c.display += key; }
+    return;
+  }
+  // operators + equals
+  var compute = function(a, b, op){
+    a = parseFloat(a); b = parseFloat(b);
+    if (op === "+") return a + b;
+    if (op === "−") return a - b;
+    if (op === "×") return a * b;
+    if (op === "÷") return b === 0 ? null : a / b;
+    return b;
+  };
+  if (key === "="){
+    if (c.op !== null && c.prev !== null){
+      var r = compute(c.prev, c.display, c.op);
+      c.display = (r === null) ? "Error" : trimNum(r);
+      c.prev = null; c.op = null; c.fresh = true;
+    }
+    return;
+  }
+  // +, −, ×, ÷
+  if (c.op !== null && c.prev !== null && !c.fresh){
+    var r2 = compute(c.prev, c.display, c.op);
+    if (r2 === null){ c.display = "Error"; c.prev = null; c.op = null; c.fresh = true; return; }
+    c.display = trimNum(r2);
+  }
+  c.prev = c.display; c.op = key; c.fresh = true;
+}
+function trimNum(n){
+  if (!isFinite(n)) return "Error";
+  var s = String(Math.round(n * 1e10) / 1e10);
+  return s;
+}
+
+function viewCalculator(){
+  if (!S.calc) S.calc = { display:"0", prev:null, op:null, fresh:true };
+  var c = S.calc;
+
+  function key(label, kind){
+    return h("button",{class:"calckey"+(kind?" calckey-"+kind:""),
+      onclick:function(){ calcPress(label === "×" ? "×" : label); }},[label]);
+  }
+
+  /* operator buttons use special glyphs but map to internal ops */
+  function opkey(label){
+    return h("button",{class:"calckey calckey-op"+(c.op===label && c.fresh ? " on":""),
+      onclick:function(){ calcPress(label); }},[label]);
+  }
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.screen="tools"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},["Calculator"])
+    ]),
+    h("div",{class:"calcwrap"},[
+      h("div",{class:"calcscreen"},[
+        h("div",{class:"calcexpr"},[ c.op && c.prev !== null ? (c.prev+" "+c.op) : "" ]),
+        h("div",{class:"calcdisplay"},[ c.display ])
+      ]),
+      h("div",{class:"calcpad"},[
+        key("C","fn"), key("+/-","fn"), key("%","fn"), opkey("÷"),
+        key("7"), key("8"), key("9"), opkey("×"),
+        key("4"), key("5"), key("6"), opkey("−"),
+        key("1"), key("2"), key("3"), opkey("+"),
+        key("0","zero"), key("."), key("=","eq")
+      ])
+    ])
+  ];
+}
+
 function viewMission(){
   var subjInp = h("input",{class:"inp",placeholder:"What's it about?",value:S.contact.subject});
   subjInp.addEventListener("input",function(e){ S.contact.subject=e.target.value; });
@@ -3231,7 +3398,7 @@ function viewIosInstall(){
 }
 
 /* ---------- render ---------- */
-var MAIN_PAGES = ["listing", "expenses", "profile", "mission"];
+var MAIN_PAGES = ["listing", "expenses", "tools", "profile", "mission"];
 
 /* Social links, shown at the foot of every page. URLs are placeholders
    until the real account links are added. Icons rotate gently and stop
@@ -3270,6 +3437,10 @@ function render(){
     kids = viewExpenseEdit();
   } else if (S.screen === "expenseDetail"){
     kids = viewExpenseDetail();
+  } else if (S.screen === "tools"){
+    kids = viewTools();
+  } else if (S.screen === "calculator"){
+    kids = viewCalculator();
   } else if (S.screen === "profile"){
     kids = viewProfile();
   } else if (S.screen === "mission"){
@@ -3282,7 +3453,7 @@ function render(){
 
   /* Social links at the foot of every in-app page */
   if (S.user && S.stage === "app" &&
-      ["listing","expenses","profile","mission","detail","edit","expenseDetail","expenseEdit"].indexOf(S.screen) > -1){
+      ["listing","expenses","tools","profile","mission","detail","edit","expenseDetail","expenseEdit"].indexOf(S.screen) > -1){
     app.appendChild(viewSocials());
   }
 
