@@ -3093,16 +3093,46 @@ function viewCalculator(){
   if (!S.calc) S.calc = { display:"0", prev:null, op:null, fresh:true };
   var c = S.calc;
 
-  function key(label, kind){
-    return h("button",{class:"calckey"+(kind?" calckey-"+kind:""),
-      onclick:function(){ calcPress(label === "×" ? "×" : label); }},[label]);
+  /* Rebuilding the WHOLE app on every tap (render() wipes and redraws
+     everything) is too slow on a real phone once taps come in quickly —
+     the screen falls behind the real state, which only catches up once
+     something else forces a full redraw. A calculator gets tapped fast,
+     so its keys update ONLY the two display elements directly, never
+     touching the rest of the page. */
+  var exprEl, displayEl, keyEls = {};
+
+  function refreshDisplay(){
+    exprEl.textContent = (c.op && c.prev !== null) ? (c.prev + " " + c.op) : "";
+    displayEl.textContent = c.display;
+    ["÷","×","−","+"].forEach(function(op){
+      var el = keyEls[op];
+      if (!el) return;
+      var on = (c.op === op && c.fresh);
+      el.setAttribute("class", "calckey calckey-op" + (on ? " on" : ""));
+    });
   }
 
-  /* operator buttons use special glyphs but map to internal ops */
-  function opkey(label){
-    return h("button",{class:"calckey calckey-op"+(c.op===label && c.fresh ? " on":""),
-      onclick:function(){ calcPress(label); }},[label]);
+  function key(label, kind){
+    var btn = h("button",{class:"calckey"+(kind?" calckey-"+kind:"")},[label]);
+    btn.addEventListener("click", function(){
+      calcPress(label);
+      refreshDisplay();
+    });
+    return btn;
   }
+
+  function opkey(label){
+    var btn = h("button",{class:"calckey calckey-op"+(c.op===label && c.fresh ? " on":"")},[label]);
+    btn.addEventListener("click", function(){
+      calcPress(label);
+      refreshDisplay();
+    });
+    keyEls[label] = btn;
+    return btn;
+  }
+
+  exprEl = h("div",{class:"calcexpr"},[ c.op && c.prev !== null ? (c.prev+" "+c.op) : "" ]);
+  displayEl = h("div",{class:"calcdisplay"},[ c.display ]);
 
   return [
     appBar(),
@@ -3113,10 +3143,7 @@ function viewCalculator(){
       h("h1",{},["Calculator"])
     ]),
     h("div",{class:"calcwrap"},[
-      h("div",{class:"calcscreen"},[
-        h("div",{class:"calcexpr"},[ c.op && c.prev !== null ? (c.prev+" "+c.op) : "" ]),
-        h("div",{class:"calcdisplay"},[ c.display ])
-      ]),
+      h("div",{class:"calcscreen"},[ exprEl, displayEl ]),
       h("div",{class:"calcpad"},[
         key("C","fn"), key("+/-","fn"), key("%","fn"), opkey("÷"),
         key("7"), key("8"), key("9"), opkey("×"),
