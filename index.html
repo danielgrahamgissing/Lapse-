@@ -987,8 +987,12 @@ function h(tag, attrs, children){
     else if (k === "html") e.innerHTML = v;
     else if (k.indexOf("on") === 0){
       /* Every button gets a brief lit "pressed" flash before its action
-         runs, so a tap always registers visually even on a fast render. */
-      if (tag === "button" && k === "onclick"){
+         runs, so a tap always registers visually even on a fast render.
+         Calculator keys skip this: rapid sequential taps there need to
+         feel instant, and the layered timers were causing the screen to
+         lag behind the real state until something else forced a redraw. */
+      var skipDelay = attrs.class && /\bcalckey\b/.test(attrs.class);
+      if (tag === "button" && k === "onclick" && !skipDelay){
         (function(handler){
           e.addEventListener("click", function(ev){
             var el = ev.currentTarget || e;
