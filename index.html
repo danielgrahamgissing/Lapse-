@@ -831,6 +831,58 @@ function deleteExpense(id, cb, filePaths){
   .catch(function(){ cb(false); });
 }
 
+/* ---------- Income ---------- */
+function rowToIncome(r){
+  return {
+    id: r.id,
+    description: r.description,
+    category: r.category || "personal",
+    amount: (r.amount === null || r.amount === undefined) ? 0 : r.amount,
+    receivedOn: r.received_on || "",
+    source: r.source || "",
+    recurring: !!r.recurring,
+    frequency: r.frequency || "",
+    notes: r.notes || ""
+  };
+}
+function incomeToRow(inc, userId){
+  return {
+    user_id: userId,
+    description: inc.description,
+    category: inc.category || "personal",
+    amount: (inc.amount === null || inc.amount === undefined || isNaN(inc.amount)) ? 0 : inc.amount,
+    received_on: inc.receivedOn || null,
+    source: inc.source || "",
+    recurring: !!inc.recurring,
+    frequency: inc.recurring ? (inc.frequency || "monthly") : "",
+    notes: inc.notes || ""
+  };
+}
+function loadIncome(cb){
+  if (!sb || !S.user){ cb([]); return; }
+  sb.from("income").select("*").order("received_on",{ascending:false})
+    .then(function(res){ cb(res.error ? [] : (res.data||[]).map(rowToIncome)); })
+    .catch(function(){ cb([]); });
+}
+function insertIncome(inc, cb){
+  if (!sb || !S.user){ cb(null); return; }
+  sb.from("income").insert(incomeToRow(inc, S.user.id)).select().single()
+    .then(function(res){ cb(res.error ? null : rowToIncome(res.data)); })
+    .catch(function(){ cb(null); });
+}
+function updateIncome(id, inc, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("income").update(incomeToRow(inc, S.user.id)).eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+function deleteIncome(id, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("income").delete().eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+
 /* Load the user's profile (subscription status) */
 /* ---------- Crypto ---------- */
 /* Top ~50 tokens by market cap, for the quick-pick list. CoinGecko ids
@@ -1153,6 +1205,7 @@ var ICONS = {
   calcR:[[4,3,16,18,3]],
   tools:["M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2 2.6-2.6Z"],
   crypto:["M9 8.5c0-1 1-1.5 2.5-1.5S14 7.5 14 8.5 13 10 11.5 10 9 10.5 9 11.5s1 1.5 2.5 1.5 2.5-.5 2.5-1.5","M11.5 5.5v1.5","M11.5 15v1.5"],
+  income:["M3 17l6-6 4 4 8-8","M17 5h4v4"],
   cryptoC:[[12,12,9]],
   out:["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4","M16 17l5-5-5-5","M21 12H9"],
   x:["M18 6 6 18","M6 6l12 12"],
@@ -1483,6 +1536,7 @@ var S = {
   catFilter:"all",
   searchOpen:false,
   expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null, deleteAccount:null, billingBusy:false,
+  income:[], incCatFilter:"all", incSearchOpen:false, incomeDraft:null, activeIncome:null, confirmDeleteIncome:null,
   crypto:[], cryptoPrices:{}, cryptoDraft:null, activeCrypto:null, confirmDeleteCrypto:null, pricesLoading:false,
   lang:"en",
   installPrompt:false,
@@ -1742,6 +1796,7 @@ function navItems(){
   return [
     {id:"listing", label:T("myRenewals"), sub:T("listSub"),                 ic:"list"},
     {id:"expenses", label:"Expenses",     sub:"What you've spent",          ic:"tag"},
+    {id:"income",   label:"Income",       sub:"What you've earned",         ic:"income"},
     {id:"crypto",   label:"Crypto",       sub:"Your holdings",              ic:"crypto"},
     {id:"tools",   label:"Tools",         sub:"Handy extras",               ic:"tools"},
     {id:"profile", label:T("profile"),    sub:T("accountDetails"),          ic:"user"},
@@ -2921,6 +2976,291 @@ function openReceipt(r){
     }).catch(function(){ ping("Couldn't open that receipt"); });
 }
 
+/* ---------- Income ---------- */
+function incomeSorted(){
+  var list = S.income.slice();
+  if (S.incCatFilter && S.incCatFilter !== "all"){
+    list = list.filter(function(i){ return i.category === S.incCatFilter; });
+  }
+  list.sort(function(a,b){
+    var da = a.receivedOn || "", db = b.receivedOn || "";
+    if (da === db) return 0;
+    return da < db ? 1 : -1;   // most recent first
+  });
+  return list;
+}
+
+function viewIncome(){
+  var list = incomeSorted();
+  var hasAny = S.income.length > 0;
+  var filtering = S.incCatFilter && S.incCatFilter !== "all";
+
+  var total = S.income.reduce(function(sum,i){ return sum + (i.amount||0); }, 0);
+  var shownTotal = list.reduce(function(sum,i){ return sum + (i.amount||0); }, 0);
+
+  var body = [];
+  if (list.length === 0 && !hasAny){
+    body.push(h("div",{class:"empty"},[
+      h("span",{style:"display:inline-flex;padding:16px;border-radius:16px;background:rgba(0,245,212,.12);color:var(--aqua)"},[icon("income",26)]),
+      h("h2",{},["No income yet"]),
+      h("p",{},["Log what you earn — description, date and amount — to see what's coming in."]),
+      h("button",{style:"margin-top:16px;font-size:14px;font-weight:600;color:var(--aqua);text-decoration:underline;text-underline-offset:4px",
+        onclick:addIncome},["Add your first income"])
+    ]));
+  } else if (list.length === 0 && filtering){
+    body.push(h("div",{class:"empty"},[
+      h("span",{style:"display:inline-flex;padding:16px;border-radius:16px;background:rgba(0,245,212,.12);color:var(--aqua)"},[icon("search",24)]),
+      h("h2",{},["Nothing here"]),
+      h("p",{},["No income in that category yet."]),
+      h("button",{style:"margin-top:16px;font-size:14px;font-weight:600;color:var(--aqua);text-decoration:underline;text-underline-offset:4px",
+        onclick:function(){ S.incCatFilter="all"; render(); }},["Clear filter"])
+    ]));
+  } else {
+    list.forEach(function(i){ body.push(incomeRow(i)); });
+  }
+
+  var catChips = [["all","All"]].concat(Object.keys(CATS).map(function(k){ return [k, CATS[k].label]; }));
+  var chipRow = h("div",{class:"catfilter"}, catChips.map(function(c){
+    var on = (S.incCatFilter||"all") === c[0];
+    return h("button",{class:"catchip"+(on?" on":""),onclick:function(){
+      S.incCatFilter = c[0]; render();
+    }},[ c[0]!=="all" ? icon(CAT(c[0]).ic,13) : null, c[1] ]);
+  }));
+
+  return [
+    appBar(),
+    h("div",{class:"listhead"},[
+      h("h1",{},["Income"]),
+      h("p",{},[ hasAny ? S.income.length+(S.income.length===1?" entry":" entries") : "Track what you earn" ])
+    ]),
+
+    h("div",{class:"addrow"},[
+      h("button",{class:"addbtn",onclick:addIncome},[icon("plus",17),"Add income"])
+    ]),
+    hasAny ? h("div",{class:"listtools"},[
+      h("button",{class:"toolicon"+(S.incSearchOpen?" on":""),"aria-label":"Filter",
+        onclick:function(){ S.incSearchOpen=!S.incSearchOpen; if(!S.incSearchOpen){S.incCatFilter="all";} render(); }},
+        [icon("search",16)])
+    ]) : null,
+
+    (hasAny && S.incSearchOpen) ? h("div",{class:"refinebar"},[ chipRow ]) : null,
+
+    h("div",{class:"body",style:"padding:4px 16px 8px"}, body),
+
+    /* running total, at the foot of the page — positive tone since this is income */
+    hasAny ? h("div",{class:"exptotal",style:"border-color:rgba(0,245,212,.3)"},[
+      h("span",{class:"exptotal-lbl"},[ (S.incCatFilter && S.incCatFilter!=="all") ? "Total ("+CAT(S.incCatFilter).label+")" : "Total income" ]),
+      h("span",{class:"exptotal-val serif",style:"color:var(--aqua);text-shadow:0 0 14px rgba(0,245,212,.35)"},
+        [ "+" + (fmtMoney(shownTotal) || "£0.00") ])
+    ]) : null
+  ];
+}
+
+function incomeRow(inc){
+  var bits = [fmtDate(inc.receivedOn), CAT(inc.category).label];
+  if (inc.source) bits.push(inc.source);
+  var sub = bits.join(" · ");
+  return h("button",{class:"lrow",onclick:function(){ openIncome(inc); }},[
+    h("span",{class:"cico",style:"background:rgba(0,245,212,.12);color:var(--aqua)"},[icon(CAT(inc.category).ic,16)]),
+    h("span",{class:"cmid"},[
+      h("span",{class:"cname"},[inc.description]),
+      h("span",{class:"desc lumin"},[sub])
+    ]),
+    h("span",{class:"cright"},[
+      h("span",{class:"crightcol"},[
+        h("b",{class:"serif costtag",style:"color:var(--aqua)"},[ "+"+(fmtMoney(inc.amount) || "£0.00") ]),
+        inc.recurring
+          ? h("span",{style:"display:flex;align-items:center;gap:3px;justify-content:flex-end;font-size:10.5px;color:var(--faint);margin-top:2px"},
+              [icon("refresh",11), inc.frequency || "recurring"]) : null
+      ]),
+      icon("chevron",15,"var(--faint)")
+    ])
+  ]);
+}
+
+function openIncome(inc){ S.activeIncome = inc; S.screen = "incomeDetail"; render(); }
+
+function addIncome(){
+  S.incomeDraft = { description:"", category:"personal", amount:null,
+    receivedOn: TODAY.toISOString().slice(0,10), source:"", recurring:false, frequency:"monthly", notes:"" };
+  S.activeIncome = null; S.screen = "incomeEdit"; render();
+}
+
+/* ---------- Income add / edit form ---------- */
+function viewIncomeEdit(){
+  var isEdit = !!S.activeIncome;
+  var f = S.incomeDraft;
+
+  function field(label, kids){
+    return h("div",{class:"fld"},[ h("label",{},[label]) ].concat(kids));
+  }
+
+  var descInp = h("input",{class:"inp",type:"text",placeholder:"e.g. Salary, freelance invoice",value:f.description});
+  descInp.addEventListener("input",function(e){ f.description=e.target.value; });
+
+  var amountInp = h("input",{class:"inp",type:"text",inputmode:"decimal",placeholder:"0.00",
+    value: (f.amount!==null && f.amount!==undefined) ? (f.amount/100).toFixed(2) : ""});
+  amountInp.addEventListener("input",function(e){
+    var v = String(e.target.value||"").replace(/[^0-9.]/g,"");
+    var num = parseFloat(v);
+    f.amount = isNaN(num) ? null : Math.round(num*100);
+  });
+
+  var dateInp = h("input",{class:"inp",type:"date",value:f.receivedOn||""});
+  dateInp.addEventListener("input",function(e){ f.receivedOn=e.target.value; });
+
+  var sourceInp = h("input",{class:"inp",type:"text",placeholder:"e.g. Employer, client name",value:f.source});
+  sourceInp.addEventListener("input",function(e){ f.source=e.target.value; });
+
+  var notesInp = h("textarea",{class:"inp",rows:"3",placeholder:"Anything worth noting"});
+  notesInp.value = f.notes || "";
+  notesInp.addEventListener("input",function(e){ f.notes=e.target.value; });
+
+  var catBtns = Object.keys(CATS).map(function(k){
+    var c = CATS[k];
+    var b = h("button",{class:"catbtn"+(f.category===k?" on":"")},[icon(c.ic,16),c.label]);
+    b.addEventListener("click",function(){ f.category=k; render(); });
+    return b;
+  });
+
+  /* recurring toggle + frequency, shown only when switched on */
+  var recurToggle = h("button",{class:"catbtn"+(f.recurring?" on":""),style:"width:100%"},
+    [icon("refresh",16), f.recurring ? "Recurring income" : "One-off income"]);
+  recurToggle.addEventListener("click",function(){ f.recurring = !f.recurring; render(); });
+
+  var freqBtns = ["weekly","monthly","yearly"].map(function(fr){
+    var b = h("button",{class:"catbtn"+(f.frequency===fr?" on":"")},[fr.charAt(0).toUpperCase()+fr.slice(1)]);
+    b.addEventListener("click",function(){ f.frequency=fr; render(); });
+    return b;
+  });
+
+  var saveBtn = h("button",{class:"btn btn-aqua"},[ isEdit ? "Save changes" : "Add income" ]);
+  saveBtn.addEventListener("click",function(){
+    if (!(f.description||"").trim()){ ping("Add a description"); return; }
+    if (f.amount === null || f.amount === undefined){ ping("Add an amount"); return; }
+    if (isEdit){
+      var id = S.activeIncome.id;
+      S.income = S.income.map(function(x){ return x.id===id ? Object.assign({},f,{id:id}) : x; });
+      S.activeIncome=null; S.screen="income"; render(); ping("Changes saved");
+      updateIncome(id, f, function(ok){ if(!ok) ping("Couldn't save — check connection"); });
+    } else {
+      var temp = Object.assign({},f,{id:"tmp-"+Date.now()});
+      S.income = S.income.concat([temp]);
+      S.activeIncome=null; S.screen="income"; render(); ping("Income added");
+      insertIncome(f, function(saved){
+        if (saved){
+          S.income = S.income.map(function(x){ return x.id===temp.id ? saved : x; });
+          render();
+        } else {
+          S.income = S.income.filter(function(x){ return x.id!==temp.id; });
+          render(); ping("Couldn't save — try again");
+        }
+      });
+    }
+  });
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.activeIncome=null; S.screen="income"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},[ isEdit ? "Edit income" : "New income" ])
+    ]),
+    h("div",{class:"body"},[
+      field("What was it", [descInp]),
+      field("Amount", [amountInp]),
+      field("Date received", [dateInp]),
+      field("Source", [sourceInp]),
+      field("Category", [h("div",{class:"cat3"},catBtns)]),
+      field("Frequency", [recurToggle]),
+      f.recurring ? field("Repeats", [h("div",{class:"cat3"},freqBtns)]) : null,
+      field("Notes", [notesInp]),
+      isEdit ? h("button",{class:"danger",style:"margin-top:22px",onclick:function(){
+        S.confirmDeleteIncome = S.activeIncome; render();
+      }},[icon("trash",15),"Delete income"]) : null
+    ]),
+    h("div",{class:"foot"},[saveBtn])
+  ];
+}
+
+/* ---------- Income detail ---------- */
+function viewIncomeDetail(){
+  var inc = S.activeIncome;
+  if (!inc) { S.screen="income"; return viewIncome(); }
+
+  function metaRow(k,v){ return h("div",{class:"kv"},[h("dt",{},[k]),h("dd",{},[v])]); }
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.activeIncome=null; S.screen="income"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},["Income"])
+    ]),
+    h("div",{class:"body"},[
+      h("div",{class:"dhead"},[
+        h("span",{class:"ic",style:"background:rgba(0,245,212,.12);color:var(--aqua)"},[icon(CAT(inc.category).ic,20)]),
+        h("div",{style:"flex:1"},[
+          h("h2",{},[inc.description]),
+          h("p",{},[CAT(inc.category).label])
+        ])
+      ]),
+      h("div",{class:"bigbox fade",style:"background:rgba(0,245,212,.1);border:1px solid rgba(0,245,212,.3);text-align:center;margin-top:16px"},[
+        h("span",{class:"n serif",style:"color:var(--aqua);text-shadow:0 0 14px rgba(0,245,212,.35)"},
+          [ "+"+(fmtMoney(inc.amount) || "£0.00") ]),
+        h("p",{style:"margin:6px 0 0;font-size:13px;color:var(--muted)"},[ fmtDate(inc.receivedOn) ])
+      ]),
+      h("dl",{class:"meta",style:"margin-top:18px"},[
+        metaRow("Source", inc.source || "—"),
+        metaRow("Frequency", inc.recurring ? ("Recurring · "+(inc.frequency||"monthly")) : "One-off")
+      ]),
+      inc.notes ? h("div",{class:"meta",style:"margin-top:14px"},[metaRow("Notes", inc.notes)]) : null,
+      h("button",{class:"btn",style:"margin-top:22px;background:transparent;border:1px solid var(--aqua);color:var(--aqua);font-weight:700",
+        onclick:function(){
+          S.incomeDraft = Object.assign({}, inc);
+          S.screen="incomeEdit"; render();
+        }},[icon("edit",16),"Edit"])
+    ])
+  ];
+}
+
+/* Confirmation before permanently deleting an income entry. */
+function viewConfirmDeleteIncome(){
+  var inc = S.confirmDeleteIncome;
+  if (!inc) return null;
+  return h("div",{class:"modalscrim",onclick:function(e){
+    if (e.target && e.target.className==="modalscrim"){ S.confirmDeleteIncome=null; render(); }
+  }},[
+    h("div",{class:"modal"},[
+      h("div",{style:"display:flex;justify-content:center"},[
+        h("span",{style:"display:inline-flex;padding:14px;border-radius:16px;background:rgba(232,115,74,.16);color:#E8734A"},[icon("trash",24)])
+      ]),
+      h("h2",{class:"serif",style:"margin:16px 0 0;font-size:20px;color:var(--ink);text-align:center"},["Delete this income?"]),
+      h("p",{style:"margin:10px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55;text-align:center"},
+        [ h("b",{style:"color:var(--ink)"},[inc.description]), " will be removed permanently." ]),
+      h("button",{class:"btn",style:"margin-top:18px;padding:13px;background:#C2542F;color:#fff;font-weight:700",
+        disabled:S.deleting,
+        onclick:function(){
+          if (S.deleting) return;
+          S.deleting=true; render();
+          var id=inc.id;
+          deleteIncome(id, function(ok){
+            S.deleting=false; S.confirmDeleteIncome=null;
+            if (ok){
+              S.income = S.income.filter(function(x){ return x.id!==id; });
+              S.activeIncome=null; S.screen="income";
+              render(); ping("Income deleted");
+            } else { render(); ping("Couldn't delete — check connection"); }
+          });
+        }},[ S.deleting ? "Deleting…" : "Yes, delete it" ]),
+      h("button",{style:"width:100%;margin-top:9px;padding:11px;font-size:14px;font-weight:600;color:var(--muted)",
+        onclick:function(){ if(!S.deleting){ S.confirmDeleteIncome=null; render(); } }},["Keep it"])
+    ])
+  ]);
+}
+
 function viewProfile(){
   var m = S.membership;
   var lapsed = membershipLapsed();
@@ -3848,7 +4188,7 @@ function viewIosInstall(){
 }
 
 /* ---------- render ---------- */
-var MAIN_PAGES = ["listing", "expenses", "crypto", "tools", "profile", "mission"];
+var MAIN_PAGES = ["listing", "expenses", "income", "crypto", "tools", "profile", "mission"];
 
 /* Social links, shown at the foot of every page. URLs are placeholders
    until the real account links are added. Icons rotate gently and stop
@@ -3887,6 +4227,12 @@ function render(){
     kids = viewExpenseEdit();
   } else if (S.screen === "expenseDetail"){
     kids = viewExpenseDetail();
+  } else if (S.screen === "income"){
+    kids = viewIncome();
+  } else if (S.screen === "incomeEdit"){
+    kids = viewIncomeEdit();
+  } else if (S.screen === "incomeDetail"){
+    kids = viewIncomeDetail();
   } else if (S.screen === "crypto"){
     kids = viewCrypto();
   } else if (S.screen === "cryptoEdit"){
@@ -3909,7 +4255,7 @@ function render(){
 
   /* Social links at the foot of every in-app page */
   if (S.user && S.stage === "app" &&
-      ["listing","expenses","crypto","tools","profile","mission","detail","edit","expenseDetail","expenseEdit","cryptoDetail","cryptoEdit"].indexOf(S.screen) > -1){
+      ["listing","expenses","income","crypto","tools","profile","mission","detail","edit","expenseDetail","expenseEdit","cryptoDetail","cryptoEdit","incomeDetail","incomeEdit"].indexOf(S.screen) > -1){
     app.appendChild(viewSocials());
   }
 
@@ -3935,6 +4281,7 @@ function render(){
   if (S.iosInstall) app.appendChild(viewIosInstall());
   if (S.confirmDelete) app.appendChild(viewConfirmDelete());
   if (S.confirmDeleteExpense) app.appendChild(viewConfirmDeleteExpense());
+  if (S.confirmDeleteIncome) app.appendChild(viewConfirmDeleteIncome());
   if (S.confirmDeleteCrypto) app.appendChild(viewConfirmDeleteCrypto());
   if (S.deleteAccount && S.deleteAccount.open) app.appendChild(viewDeleteAccount());
 
@@ -4011,6 +4358,7 @@ function enterApp(user){
       S.installPrompt = false;
       render();
       loadExpenses(function(exps){ S.expenses = exps; render(); });
+      loadIncome(function(inc){ S.income = inc; render(); });
       loadCrypto(function(cr){
         S.crypto = cr; render();
         refreshCryptoPrices();
