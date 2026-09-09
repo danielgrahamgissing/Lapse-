@@ -577,6 +577,13 @@
 
   /* ---- tools page ---- */
   .toolgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tokenpick{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+  .tokenpick::-webkit-scrollbar{display:none}
+  .tokenchip{flex-shrink:0;display:inline-flex;align-items:center;padding:8px 13px;
+    border-radius:999px;font-size:12.5px;font-weight:700;color:var(--muted);
+    background:var(--card);border:var(--lumtrim);white-space:nowrap}
+  .tokenchip.on{background:var(--aqua);color:#02100E;border-color:var(--aqua);
+    box-shadow:0 0 16px -4px rgba(0,245,212,.7)}
   .toolcard{display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:8px;padding:26px 14px;border-radius:18px;background:var(--card);
     border:var(--lumtrim);box-shadow:var(--cardglow);backdrop-filter:blur(8px);
@@ -825,6 +832,108 @@ function deleteExpense(id, cb, filePaths){
 }
 
 /* Load the user's profile (subscription status) */
+/* ---------- Crypto ---------- */
+/* Top ~50 tokens by market cap, for the quick-pick list. CoinGecko ids
+   are what the price API needs; symbol/name are for display. Anything
+   not on this list can still be entered as free text. */
+var TOP_TOKENS = [
+  ["bitcoin","BTC","Bitcoin"], ["ethereum","ETH","Ethereum"], ["tether","USDT","Tether"],
+  ["binancecoin","BNB","BNB"], ["solana","SOL","Solana"], ["ripple","XRP","XRP"],
+  ["usd-coin","USDC","USD Coin"], ["staked-ether","STETH","Lido Staked Ether"],
+  ["cardano","ADA","Cardano"], ["dogecoin","DOGE","Dogecoin"], ["tron","TRX","TRON"],
+  ["avalanche-2","AVAX","Avalanche"], ["the-open-network","TON","Toncoin"],
+  ["chainlink","LINK","Chainlink"], ["polkadot","DOT","Polkadot"],
+  ["wrapped-bitcoin","WBTC","Wrapped Bitcoin"], ["matic-network","MATIC","Polygon"],
+  ["shiba-inu","SHIB","Shiba Inu"], ["bitcoin-cash","BCH","Bitcoin Cash"],
+  ["litecoin","LTC","Litecoin"], ["dai","DAI","Dai"], ["uniswap","UNI","Uniswap"],
+  ["internet-computer","ICP","Internet Computer"], ["near","NEAR","NEAR Protocol"],
+  ["leo-token","LEO","LEO Token"], ["aptos","APT","Aptos"], ["stellar","XLM","Stellar"],
+  ["ethereum-classic","ETC","Ethereum Classic"], ["render-token","RENDER","Render"],
+  ["cosmos","ATOM","Cosmos"], ["okb","OKB","OKB"], ["hedera-hashgraph","HBAR","Hedera"],
+  ["filecoin","FIL","Filecoin"], ["arbitrum","ARB","Arbitrum"], ["mantle","MNT","Mantle"],
+  ["cronos","CRO","Cronos"], ["vechain","VET","VeChain"], ["immutable-x","IMX","Immutable"],
+  ["kaspa","KAS","Kaspa"], ["monero","XMR","Monero"], ["optimism","OP","Optimism"],
+  ["maker","MKR","Maker"], ["algorand","ALGO","Algorand"], ["injective-protocol","INJ","Injective"],
+  ["fantom","FTM","Fantom"], ["the-graph","GRT","The Graph"], ["aave","AAVE","Aave"],
+  ["sui","SUI","Sui"], ["theta-token","THETA","Theta Network"],
+  ["thorchain","RUNE","THORChain"], ["flow","FLOW","Flow"]
+];
+
+function rowToCrypto(r){
+  return {
+    id: r.id,
+    tokenId: r.token_id,
+    symbol: r.symbol,
+    name: r.name,
+    amount: (r.amount===null||r.amount===undefined) ? 0 : parseFloat(r.amount),
+    boughtOn: r.bought_on || "",
+    buyPrice: (r.buy_price===null||r.buy_price===undefined) ? null : r.buy_price,
+    exchange: r.exchange || "",
+    storage: r.storage || "",
+    notes: r.notes || ""
+  };
+}
+function cryptoToRow(x, userId){
+  return {
+    user_id: userId,
+    token_id: x.tokenId || (x.symbol||"").toLowerCase(),
+    symbol: (x.symbol||"").toUpperCase(),
+    name: x.name || x.symbol || "",
+    amount: (x.amount===null||x.amount===undefined||isNaN(x.amount)) ? 0 : x.amount,
+    bought_on: x.boughtOn || null,
+    buy_price: (x.buyPrice===null||x.buyPrice===undefined||isNaN(x.buyPrice)) ? null : x.buyPrice,
+    exchange: x.exchange || "",
+    storage: x.storage || "",
+    notes: x.notes || ""
+  };
+}
+function loadCrypto(cb){
+  if (!sb || !S.user){ cb([]); return; }
+  sb.from("crypto_holdings").select("*").order("created_at",{ascending:false})
+    .then(function(res){ cb(res.error ? [] : (res.data||[]).map(rowToCrypto)); })
+    .catch(function(){ cb([]); });
+}
+function insertCrypto(x, cb){
+  if (!sb || !S.user){ cb(null); return; }
+  sb.from("crypto_holdings").insert(cryptoToRow(x, S.user.id)).select().single()
+    .then(function(res){ cb(res.error ? null : rowToCrypto(res.data)); })
+    .catch(function(){ cb(null); });
+}
+function updateCrypto(id, x, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("crypto_holdings").update(cryptoToRow(x, S.user.id)).eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+function deleteCrypto(id, cb){
+  if (!sb || !S.user){ cb(false); return; }
+  sb.from("crypto_holdings").delete().eq("id", id)
+    .then(function(res){ cb(!res.error); })
+    .catch(function(){ cb(false); });
+}
+/* Fetch live GBP prices for a list of CoinGecko token ids. */
+function loadCryptoPrices(tokenIds, cb){
+  var ids = Array.from(new Set((tokenIds||[]).filter(Boolean)));
+  if (!ids.length){ cb({}); return; }
+  fetch("/.netlify/functions/crypto-prices", {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ ids: ids })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(out){ cb(out && !out.error ? out : {}); })
+  .catch(function(){ cb({}); });
+}
+
+/* Refresh live prices for every token currently held. */
+function refreshCryptoPrices(){
+  var ids = S.crypto.map(function(x){ return x.tokenId; }).filter(Boolean);
+  if (!ids.length) return;
+  S.pricesLoading = true; render();
+  loadCryptoPrices(ids, function(prices){
+    S.cryptoPrices = prices; S.pricesLoading = false; render();
+  });
+}
+
 function loadProfile(cb){
   if (!sb || !S.user){ cb(null); return; }
   sb.from("profiles").select("*").eq("id", S.user.id).single()
@@ -1043,6 +1152,8 @@ var ICONS = {
   calc:["M8 6h8","M8 10h.01","M12 10h.01","M16 10h.01","M8 14h.01","M12 14h.01","M16 14h.01","M8 18h.01","M12 18h.01","M16 18h.01"],
   calcR:[[4,3,16,18,3]],
   tools:["M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2 2.6-2.6Z"],
+  crypto:["M9 8.5c0-1 1-1.5 2.5-1.5S14 7.5 14 8.5 13 10 11.5 10 9 10.5 9 11.5s1 1.5 2.5 1.5 2.5-.5 2.5-1.5","M11.5 5.5v1.5","M11.5 15v1.5"],
+  cryptoC:[[12,12,9]],
   out:["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4","M16 17l5-5-5-5","M21 12H9"],
   x:["M18 6 6 18","M6 6l12 12"],
   lock:["M7 11V7a5 5 0 0 1 10 0v4"],
@@ -1372,6 +1483,7 @@ var S = {
   catFilter:"all",
   searchOpen:false,
   expCatFilter:"all", expSearchOpen:false, confirmDeleteExpense:null, deleteAccount:null, billingBusy:false,
+  crypto:[], cryptoPrices:{}, cryptoDraft:null, activeCrypto:null, confirmDeleteCrypto:null, pricesLoading:false,
   lang:"en",
   installPrompt:false,
   iosInstall:false,
@@ -1630,6 +1742,7 @@ function navItems(){
   return [
     {id:"listing", label:T("myRenewals"), sub:T("listSub"),                 ic:"list"},
     {id:"expenses", label:"Expenses",     sub:"What you've spent",          ic:"tag"},
+    {id:"crypto",   label:"Crypto",       sub:"Your holdings",              ic:"crypto"},
     {id:"tools",   label:"Tools",         sub:"Handy extras",               ic:"tools"},
     {id:"profile", label:T("profile"),    sub:T("accountDetails"),          ic:"user"},
     {id:"mission", label:T("mission"),    sub:T("whatWeDo"),                ic:"target"}
@@ -3004,6 +3117,312 @@ function deleteAccountNow(cb){
 }
 
 /* ---------- Tools page ---------- */
+/* ---------- Crypto ---------- */
+function cryptoValueOf(x){
+  var price = S.cryptoPrices[x.tokenId] && S.cryptoPrices[x.tokenId].gbp;
+  if (price === undefined || price === null) return null;
+  return Math.round(price * x.amount * 100);   // pence, for fmtMoney
+}
+function cryptoCostOf(x){
+  if (x.buyPrice === null || x.buyPrice === undefined) return null;
+  return Math.round(x.buyPrice * x.amount);
+}
+function cryptoPnlOf(x){
+  var val = cryptoValueOf(x), cost = cryptoCostOf(x);
+  if (val === null || cost === null) return null;
+  return val - cost;
+}
+
+function viewCrypto(){
+  var hasAny = S.crypto.length > 0;
+  var totalValue = 0, totalCost = 0, anyLive = false, anyCost = false;
+  S.crypto.forEach(function(x){
+    var v = cryptoValueOf(x), c = cryptoCostOf(x);
+    if (v !== null){ totalValue += v; anyLive = true; }
+    if (c !== null){ totalCost += c; anyCost = true; }
+  });
+  var totalPnl = (anyLive && anyCost) ? (totalValue - totalCost) : null;
+
+  var body = [];
+  if (!hasAny){
+    body.push(h("div",{class:"empty"},[
+      h("span",{style:"display:inline-flex;padding:16px;border-radius:16px;background:rgba(0,245,212,.12);color:var(--aqua)"},[icon("crypto",26)]),
+      h("h2",{},["No holdings yet"]),
+      h("p",{},["Add what you hold and Lapse tracks its live value for you."]),
+      h("button",{style:"margin-top:16px;font-size:14px;font-weight:600;color:var(--aqua);text-decoration:underline;text-underline-offset:4px",
+        onclick:addCrypto},["Add your first holding"])
+    ]));
+  } else {
+    S.crypto.forEach(function(x){ body.push(cryptoRow(x)); });
+  }
+
+  return [
+    appBar(),
+    h("div",{class:"listhead"},[
+      h("h1",{},["Crypto"]),
+      h("p",{},[ hasAny ? S.crypto.length+(S.crypto.length===1?" holding":" holdings") : "Track what you hold" ])
+    ]),
+    h("div",{class:"addrow"},[
+      h("button",{class:"addbtn",onclick:addCrypto},[icon("plus",17),"Add holding"])
+    ]),
+    hasAny ? h("div",{class:"listtools"},[
+      h("button",{class:"toolicon",disabled:S.pricesLoading,"aria-label":"Refresh prices",
+        onclick:refreshCryptoPrices},
+        [icon("refresh",16)]),
+      h("span",{style:"font-size:12px;color:var(--muted)"},
+        [ S.pricesLoading ? "Updating prices…" : "Live prices via CoinGecko" ])
+    ]) : null,
+
+    h("div",{class:"body",style:"padding:4px 16px 8px"}, body),
+
+    hasAny ? h("div",{class:"exptotal"},[
+      h("span",{class:"exptotal-lbl"},["Total value"]),
+      h("span",{class:"exptotal-val serif"},[ anyLive ? (fmtMoney(totalValue)||"£0.00") : "—" ])
+    ]) : null,
+    (hasAny && totalPnl !== null) ? h("p",{style:"text-align:center;font-size:13px;font-weight:600;margin:-4px 16px 8px;"
+        + "color:"+(totalPnl>=0 ? "var(--aqua)" : "#E8734A")},
+      [ (totalPnl>=0?"▲ ":"▼ ") + fmtMoney(Math.abs(totalPnl)) + " " + (totalPnl>=0?"profit":"loss") + " overall" ]) : null
+  ];
+}
+
+function cryptoRow(x){
+  var val = cryptoValueOf(x);
+  var pnl = cryptoPnlOf(x);
+  var sub = (x.amount % 1 === 0 ? x.amount : x.amount) + " " + x.symbol
+    + (x.storage ? " · "+x.storage : "");
+  return h("button",{class:"lrow",onclick:function(){ openCrypto(x); }},[
+    h("span",{class:"cico",style:"background:rgba(0,245,212,.10);color:var(--aqua)"},[icon("crypto",16)]),
+    h("span",{class:"cmid"},[
+      h("span",{class:"cname"},[x.name || x.symbol]),
+      h("span",{class:"desc lumin"},[sub])
+    ]),
+    h("span",{class:"cright"},[
+      h("span",{class:"crightcol"},[
+        h("b",{class:"serif costtag",style:"color:var(--ink)"},[ val!==null ? (fmtMoney(val)||"£0.00") : "—" ]),
+        pnl !== null
+          ? h("span",{style:"display:block;font-size:10.5px;font-weight:700;margin-top:2px;"
+              + "color:"+(pnl>=0?"var(--aqua)":"#E8734A")},
+              [ (pnl>=0?"+":"−") + fmtMoney(Math.abs(pnl)) ])
+          : null
+      ]),
+      icon("chevron",15,"var(--faint)")
+    ])
+  ]);
+}
+
+function openCrypto(x){ S.activeCrypto = x; S.screen = "cryptoDetail"; render(); }
+
+function addCrypto(){
+  S.cryptoDraft = { tokenId:"", symbol:"", name:"", amount:null, boughtOn:"",
+    buyPrice:null, exchange:"", storage:"", notes:"" };
+  S.activeCrypto = null; S.screen = "cryptoEdit"; render();
+}
+
+/* ---------- Crypto add / edit form ---------- */
+function viewCryptoEdit(){
+  var isEdit = !!S.activeCrypto;
+  var f = S.cryptoDraft;
+
+  function field(label, kids){
+    return h("div",{class:"fld"},[ h("label",{},[label]) ].concat(kids));
+  }
+
+  /* token quick-pick: a scrollable row of common tokens, or type your own */
+  var pickRow = h("div",{class:"tokenpick"}, TOP_TOKENS.slice(0,50).map(function(tk){
+    var on = f.tokenId === tk[0];
+    var chip = h("button",{class:"tokenchip"+(on?" on":"")},[tk[1]]);
+    chip.addEventListener("click",function(){
+      f.tokenId = tk[0]; f.symbol = tk[1]; f.name = tk[2]; render();
+    });
+    return chip;
+  }));
+
+  var nameInp = h("input",{class:"inp",type:"text",placeholder:"e.g. Bitcoin",value:f.name});
+  nameInp.addEventListener("input",function(e){
+    f.name = e.target.value;
+    /* typing a custom name clears the quick-pick match unless it still fits */
+    var match = TOP_TOKENS.find(function(t){ return t[2].toLowerCase()===f.name.toLowerCase(); });
+    if (match){ f.tokenId=match[0]; f.symbol=match[1]; }
+    else if (!f.symbol){ f.tokenId = f.name.toLowerCase().replace(/[^a-z0-9]+/g,"-"); }
+  });
+
+  var symInp = h("input",{class:"inp",type:"text",placeholder:"e.g. BTC",value:f.symbol,
+    style:"text-transform:uppercase"});
+  symInp.addEventListener("input",function(e){ f.symbol = e.target.value.toUpperCase(); });
+
+  var amountInp = h("input",{class:"inp",type:"text",inputmode:"decimal",placeholder:"0.00",
+    value: (f.amount!==null && f.amount!==undefined) ? String(f.amount) : ""});
+  amountInp.addEventListener("input",function(e){
+    var v = String(e.target.value||"").replace(/[^0-9.]/g,"");
+    var num = parseFloat(v);
+    f.amount = isNaN(num) ? null : num;
+  });
+
+  var buyPriceInp = h("input",{class:"inp",type:"text",inputmode:"decimal",placeholder:"Price paid per token, £",
+    value: (f.buyPrice!==null && f.buyPrice!==undefined) ? (f.buyPrice/100).toFixed(2) : ""});
+  buyPriceInp.addEventListener("input",function(e){
+    var v = String(e.target.value||"").replace(/[^0-9.]/g,"");
+    var num = parseFloat(v);
+    f.buyPrice = isNaN(num) ? null : Math.round(num*100);
+  });
+
+  var dateInp = h("input",{class:"inp",type:"date",value:f.boughtOn||""});
+  dateInp.addEventListener("input",function(e){ f.boughtOn=e.target.value; });
+
+  var exchangeInp = h("input",{class:"inp",type:"text",placeholder:"e.g. Coinbase, Binance",value:f.exchange});
+  exchangeInp.addEventListener("input",function(e){ f.exchange=e.target.value; });
+
+  var storageInp = h("input",{class:"inp",type:"text",placeholder:"e.g. Ledger, exchange wallet",value:f.storage});
+  storageInp.addEventListener("input",function(e){ f.storage=e.target.value; });
+
+  var notesInp = h("textarea",{class:"inp",rows:"3",placeholder:"Anything worth noting"});
+  notesInp.value = f.notes || "";
+  notesInp.addEventListener("input",function(e){ f.notes=e.target.value; });
+
+  var saveBtn = h("button",{class:"btn btn-aqua"},[ isEdit ? "Save changes" : "Add holding" ]);
+  saveBtn.addEventListener("click",function(){
+    if (!(f.name||"").trim() && !(f.symbol||"").trim()){ ping("Add a token name or symbol"); return; }
+    if (!f.symbol) f.symbol = (f.name||"").slice(0,6).toUpperCase();
+    if (!f.name) f.name = f.symbol;
+    if (!f.tokenId) f.tokenId = f.symbol.toLowerCase();
+    if (f.amount === null || f.amount === undefined || f.amount <= 0){ ping("Add how much you hold"); return; }
+    if (isEdit){
+      var id = S.activeCrypto.id;
+      S.crypto = S.crypto.map(function(x){ return x.id===id ? Object.assign({},f,{id:id}) : x; });
+      S.activeCrypto=null; S.screen="crypto"; render(); ping("Changes saved");
+      updateCrypto(id, f, function(ok){
+        if (!ok) ping("Couldn't save — check connection");
+        else refreshCryptoPrices();
+      });
+    } else {
+      var temp = Object.assign({},f,{id:"tmp-"+Date.now()});
+      S.crypto = S.crypto.concat([temp]);
+      S.activeCrypto=null; S.screen="crypto"; render(); ping("Holding added");
+      insertCrypto(f, function(saved){
+        if (saved){
+          S.crypto = S.crypto.map(function(x){ return x.id===temp.id ? saved : x; });
+          render(); refreshCryptoPrices();
+        } else {
+          S.crypto = S.crypto.filter(function(x){ return x.id!==temp.id; });
+          render(); ping("Couldn't save — try again");
+        }
+      });
+    }
+  });
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.activeCrypto=null; S.screen="crypto"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},[ isEdit ? "Edit holding" : "New holding" ])
+    ]),
+    h("div",{class:"body"},[
+      field("Common tokens", [pickRow]),
+      field("Token name", [nameInp]),
+      field("Symbol", [symInp]),
+      field("How much you hold", [amountInp]),
+      field("Price paid per token", [buyPriceInp]),
+      field("Date bought", [dateInp]),
+      field("Bought on (exchange)", [exchangeInp]),
+      field("Stored where", [storageInp]),
+      field("Notes", [notesInp]),
+      isEdit ? h("button",{class:"danger",style:"margin-top:22px",onclick:function(){
+        S.confirmDeleteCrypto = S.activeCrypto; render();
+      }},[icon("trash",15),"Delete holding"]) : null
+    ]),
+    h("div",{class:"foot"},[saveBtn])
+  ];
+}
+
+/* ---------- Crypto detail ---------- */
+function viewCryptoDetail(){
+  var x = S.activeCrypto;
+  if (!x) { S.screen="crypto"; return viewCrypto(); }
+
+  function metaRow(k,v){ return h("div",{class:"kv"},[h("dt",{},[k]),h("dd",{},[v])]); }
+
+  var val = cryptoValueOf(x), cost = cryptoCostOf(x), pnl = cryptoPnlOf(x);
+  var price = S.cryptoPrices[x.tokenId] && S.cryptoPrices[x.tokenId].gbp;
+
+  return [
+    appBar(),
+    h("div",{class:"tophdr",style:"padding:14px 20px 4px"},[
+      h("button",{class:"back","aria-label":"Back",onclick:function(){
+        S.activeCrypto=null; S.screen="crypto"; render();
+      }},[icon("chevron",20)]),
+      h("h1",{},["Holding"])
+    ]),
+    h("div",{class:"body"},[
+      h("div",{class:"dhead"},[
+        h("span",{class:"ic",style:"background:rgba(0,245,212,.10);color:var(--aqua)"},[icon("crypto",20)]),
+        h("div",{style:"flex:1"},[
+          h("h2",{},[x.name || x.symbol]),
+          h("p",{},[x.amount+" "+x.symbol])
+        ])
+      ]),
+      h("div",{class:"bigbox fade",style:"background:rgba(0,245,212,.08);border:1px solid rgba(0,245,212,.25);text-align:center;margin-top:16px"},[
+        h("span",{class:"n serif",style:"color:var(--ink)"},[ val!==null ? (fmtMoney(val)||"£0.00") : "—" ]),
+        h("p",{style:"margin:6px 0 0;font-size:13px;color:var(--muted)"},
+          [ price ? "£"+price.toLocaleString(undefined,{maximumFractionDigits:price<1?6:2})+" per "+x.symbol : "Price unavailable" ]),
+        pnl !== null ? h("p",{style:"margin:8px 0 0;font-size:14px;font-weight:700;"
+            + "color:"+(pnl>=0?"var(--aqua)":"#E8734A")},
+          [ (pnl>=0?"▲ +":"▼ −") + fmtMoney(Math.abs(pnl)) + " "+(pnl>=0?"profit":"loss") ]) : null
+      ]),
+      h("dl",{class:"meta",style:"margin-top:18px"},[
+        metaRow("Amount held", x.amount+" "+x.symbol),
+        metaRow("Price paid", cost!==null ? (fmtMoney(x.buyPrice)+" per token") : "—"),
+        metaRow("Cost basis", cost!==null ? (fmtMoney(cost)||"£0.00") : "—"),
+        metaRow("Date bought", x.boughtOn ? fmtDate(x.boughtOn) : "—"),
+        metaRow("Bought on", x.exchange || "—"),
+        metaRow("Stored", x.storage || "—")
+      ]),
+      x.notes ? h("div",{class:"meta",style:"margin-top:14px"},[metaRow("Notes", x.notes)]) : null,
+      h("button",{class:"btn",style:"margin-top:22px;background:transparent;border:1px solid var(--aqua);color:var(--aqua);font-weight:700",
+        onclick:function(){
+          S.cryptoDraft = Object.assign({}, x);
+          S.screen="cryptoEdit"; render();
+        }},[icon("edit",16),"Edit"])
+    ])
+  ];
+}
+
+/* Confirmation before permanently deleting a holding. */
+function viewConfirmDeleteCrypto(){
+  var x = S.confirmDeleteCrypto;
+  if (!x) return null;
+  return h("div",{class:"modalscrim",onclick:function(e){
+    if (e.target && e.target.className==="modalscrim"){ S.confirmDeleteCrypto=null; render(); }
+  }},[
+    h("div",{class:"modal"},[
+      h("div",{style:"display:flex;justify-content:center"},[
+        h("span",{style:"display:inline-flex;padding:14px;border-radius:16px;background:rgba(232,115,74,.16);color:#E8734A"},[icon("trash",24)])
+      ]),
+      h("h2",{class:"serif",style:"margin:16px 0 0;font-size:20px;color:var(--ink);text-align:center"},["Delete this holding?"]),
+      h("p",{style:"margin:10px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55;text-align:center"},
+        [ h("b",{style:"color:var(--ink)"},[x.name||x.symbol]), " will be removed permanently." ]),
+      h("button",{class:"btn",style:"margin-top:18px;padding:13px;background:#C2542F;color:#fff;font-weight:700",
+        disabled:S.deleting,
+        onclick:function(){
+          if (S.deleting) return;
+          S.deleting=true; render();
+          var id=x.id;
+          deleteCrypto(id, function(ok){
+            S.deleting=false; S.confirmDeleteCrypto=null;
+            if (ok){
+              S.crypto = S.crypto.filter(function(c){ return c.id!==id; });
+              S.activeCrypto=null; S.screen="crypto";
+              render(); ping("Holding deleted");
+            } else { render(); ping("Couldn't delete — check connection"); }
+          });
+        }},[ S.deleting ? "Deleting…" : "Yes, delete it" ]),
+      h("button",{style:"width:100%;margin-top:9px;padding:11px;font-size:14px;font-weight:600;color:var(--muted)",
+        onclick:function(){ if(!S.deleting){ S.confirmDeleteCrypto=null; render(); } }},["Keep it"])
+    ])
+  ]);
+}
+
 function viewTools(){
   var tools = [
     { id:"calc", label:"Calculator", sub:"Quick sums", ic:"calc",
@@ -3429,7 +3848,7 @@ function viewIosInstall(){
 }
 
 /* ---------- render ---------- */
-var MAIN_PAGES = ["listing", "expenses", "tools", "profile", "mission"];
+var MAIN_PAGES = ["listing", "expenses", "crypto", "tools", "profile", "mission"];
 
 /* Social links, shown at the foot of every page. URLs are placeholders
    until the real account links are added. Icons rotate gently and stop
@@ -3468,6 +3887,12 @@ function render(){
     kids = viewExpenseEdit();
   } else if (S.screen === "expenseDetail"){
     kids = viewExpenseDetail();
+  } else if (S.screen === "crypto"){
+    kids = viewCrypto();
+  } else if (S.screen === "cryptoEdit"){
+    kids = viewCryptoEdit();
+  } else if (S.screen === "cryptoDetail"){
+    kids = viewCryptoDetail();
   } else if (S.screen === "tools"){
     kids = viewTools();
   } else if (S.screen === "calculator"){
@@ -3484,7 +3909,7 @@ function render(){
 
   /* Social links at the foot of every in-app page */
   if (S.user && S.stage === "app" &&
-      ["listing","expenses","tools","profile","mission","detail","edit","expenseDetail","expenseEdit"].indexOf(S.screen) > -1){
+      ["listing","expenses","crypto","tools","profile","mission","detail","edit","expenseDetail","expenseEdit","cryptoDetail","cryptoEdit"].indexOf(S.screen) > -1){
     app.appendChild(viewSocials());
   }
 
@@ -3510,6 +3935,7 @@ function render(){
   if (S.iosInstall) app.appendChild(viewIosInstall());
   if (S.confirmDelete) app.appendChild(viewConfirmDelete());
   if (S.confirmDeleteExpense) app.appendChild(viewConfirmDeleteExpense());
+  if (S.confirmDeleteCrypto) app.appendChild(viewConfirmDeleteCrypto());
   if (S.deleteAccount && S.deleteAccount.open) app.appendChild(viewDeleteAccount());
 
   if (S.toast){
@@ -3585,6 +4011,10 @@ function enterApp(user){
       S.installPrompt = false;
       render();
       loadExpenses(function(exps){ S.expenses = exps; render(); });
+      loadCrypto(function(cr){
+        S.crypto = cr; render();
+        refreshCryptoPrices();
+      });
 
       /* Just returned from a successful Stripe checkout? The webhook may
          take a second or two to flip the profile, so poll a few times. */
